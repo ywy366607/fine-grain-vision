@@ -1,0 +1,16 @@
+task=angles | res 64 | steps 1500 | batch 64 | chance = 0.20 | seeds 1 | device cuda | amp=1 compile=0
+
+  [slice_loc_nogumbel] pool_n=4096 on_gpu (~192 MiB raw)
+  slice_loc_nogumbel seed0   3278s  (pool 0.8s + warm 13.9s + train 3263.6s)  [amp] 107.6k par  tok=32   PR_obj=13.08  s15=0.000  s30=0.123  s45=0.871  s60=0.000  s90=0.000
+    collapse: PR_mass=18.20  H_mass=0.908  H_point=0.870  cos_tok=0.933  r99=30.6/32
+    ckpt 鈫?checkpoints/angles64\angles_slice_loc_nogumbel_seed0_res64.pt
+  [patch16] pool_n=4096 on_gpu (~192 MiB raw)
+  patch16      seed0     26s  (pool 0.7s + warm 0.3s + train 24.9s)  [amp] 168.7k par  tok=16   PR_obj=  nan  s15=0.053  s30=0.270  s45=0.561  s60=0.062  s90=0.072
+    ckpt 鈫?checkpoints/angles64\angles_patch16_seed0_res64.pt
+
+arm           tok  PR_obj |         s=15         s=30         s=45         s=60         s=90
+slice_loc_nogumbel   32   13.08 | 0.000        0.123        0.871        0.000        0.000       
+patch16        16     nan | 0.053        0.270        0.561        0.062        0.072       
+
+v1: P1 patch cliff tracks patch size | P2 slice flat to s=1 | P3 slice_sum degrades | P4 patch4_hi buys ~1 octave at 4x tokens
+v2: P5' PR_obj~1 => shape-blind, slice should lose on glyph; PR_obj>>1 => parts decomposition | P6 lines: patch arms fine, s/p law does NOT transfer | P7 slice_const lands strictly between slice and slice_sum | P8 connect: no arm clears 0.65

@@ -3,6 +3,30 @@
 AdaTempSlice is ported from Transolver++ (thuml/Transolver_plus) with optional
 extensions: no-Gumbel assignment, stride-1 local DW conv, Stiefel Newton–Schulz
 directions, sparse deslice write, and Qwen-style residual/SDPA gates.
+
+Soft-deslice noise (primary)
+----------------------------
+Transolver's write path is soft MoE scatter: every point receives a mixture of
+all G slice messages. That leaks energy off the thin structure into background
+pixels (line-recon FP). **Primary fix** is sparse/thresholded *write* weights
+(``sparse_deslice_weights``) while mass-norm soft *read/pool* stays soft for
+small-target amplitude and gradients.
+
+Qwen gated attention (secondary, correct placement)
+---------------------------------------------------
+Qiu et al., arXiv:2505.06708 (NeurIPS 2025 Best Paper; used in Qwen3-Next):
+head-specific ``O ← σ(W x) ⊙ SDPA(Q,K,V)`` — gate is **after** SDPA, not on
+QK softmax and not only on the task head. Mapped here as:
+  (1) ``AdaTempSlice.qwen_sdpa_gate``: σ-gate multiplies **slice-token** SDPA
+      output before deslice (query-side features = mass-normed tokens);
+  (2) ``Block.use_res_gate``: residual-stream form ``x + σ(W x_pre) ⊙ mix_out``
+      (gate multiplies the branch entering residual add).
+
+Recurrence (fallback only)
+--------------------------
+Shared-weight multi-pass mix (Universal Transformer / iterative refinement)
+is **not** the primary scatter fix. Enable ``Block.recur_T > 1`` only after
+sparse write is measured; default T=1 (single pass).
 """
 from __future__ import annotations
 
@@ -184,29 +208,26 @@ class AdaTempSlice(nn.Module):
             self.last_mass = mass.detach()
 
         att = F.scaled_dot_product_attention(self.to_q(tok), self.to_k(tok), self.to_v(tok))
-        # Qwen gated attention (arXiv:2505.06708): head-specific σ-gate *after* SDPA.
-        # Gate input = residual-stream point features in this head (xm), query-dependent.
+        # Qwen gated attention (arXiv:2505.06708): head-specific σ-gate *after* SDPA
+        # on the attention *output* (slice tokens), not on QK softmax.
+        # Query-side features = mass-normalized slice tokens `tok` [B,H,G,Dh]
+        # (Transolver's "query positions" are the G slices). Form:
+        #   G = σ(tok W_θ) ∈ (0,1)^{B,H,G,1};  att ← G ⊙ att
         if getattr(self, "qwen_sdpa_gate", False):
-            # xm: [B,H,N,Dh] → gate [B,H,N,1]; broadcast over G when deslicing via att
-            g_pt = torch.sigmoid(self.sdpa_gate_proj(xm))          # [B,H,N,1]
-            # Apply on slice tokens via deslice: modulate values at points after scatter
-            # Paper multiplies SDPA output per head before out-proj. Our SDPA lives on
-            # G slices; map head gate by averaging over points weighted by soft w, or
-            # equivalently gate after deslice at points. Point-wise after deslice is the
-            # residual-stream-aligned placement for Transolver write path:
-            self._point_sdpa_gate = g_pt                           # stash for after deslice
+            g_tok = torch.sigmoid(self.sdpa_gate_proj(tok))        # [B,H,G,1]
+            att = att * g_tok
+            self.last_sdpa_gate = g_tok.detach()
         else:
-            self._point_sdpa_gate = None
+            self.last_sdpa_gate = None
 
-        # --- WRITE / deslice: optional sparse scatter (primary soft-scatter fix) ---
+        # --- WRITE / deslice: optional sparse scatter (PRIMARY soft-scatter fix) ---
+        # Soft pool/read above is unchanged; only the write path may sparsify.
         w_write = sparse_deslice_weights(
             w,
             topk=getattr(self, "deslice_topk", 0),
             threshold=getattr(self, "deslice_threshold", 0.0),
         )
         out = torch.einsum("bhgc,bhng->bhnc", att, w_write)        # deslice
-        if self._point_sdpa_gate is not None:
-            out = out * self._point_sdpa_gate                      # [B,H,N,Dh] * [B,H,N,1]
         out = out.permute(0, 2, 1, 3).reshape(B, N, self.h * self.dh)
 
         # probes
@@ -242,10 +263,15 @@ class Block(nn.Module):
 
     ``x ← x + σ(W_g x_pre) ⊙ mix_out`` when ``res_gate`` is enabled.
 
-    This is the Transolver residual-stream analogue of Qwen gated attention's
-    post-mix write control (arXiv:2505.06708): gate multiplies the *branch*
-    entering the residual, from residual-stream features — not QK scores and
-    not the task head. SDPA-output head gates live inside ``AdaTempSlice``.
+    This is the residual-stream analogue of Qwen post-attn write control
+    (arXiv:2505.06708): gate multiplies the *branch* entering residual add,
+    from residual-stream features — not QK scores, not the task head.
+    Slice-token SDPA output gates live inside ``AdaTempSlice.qwen_sdpa_gate``.
+
+    Optional **fallback** refinement: ``recur_T > 1`` reuses the same mixer
+    weights T times (Universal Transformer / iterative refinement style).
+    Default T=1. Prefer sparse deslice for soft-scatter first; recurrence is
+    not the primary noise fix.
     """
 
     def __init__(self, dim, mixer, mlp_ratio=2):
@@ -259,8 +285,11 @@ class Block(nn.Module):
         # start near-open so early training ≈ ungated residual
         nn.init.zeros_(self.res_gate_proj.weight)
         nn.init.constant_(self.res_gate_proj.bias, 2.0)
+        # fallback shared-weight multi-pass (default single pass)
+        self.recur_T = 1
 
-    def forward(self, x):
+    def _mix_residual(self, x):
+        """One residual mix step: x + [gate ⊙] mix(LN(x))."""
         pre = x
         m, aux = self.mix(self.ln1(x))
         if getattr(self, "use_res_gate", False):
@@ -269,6 +298,14 @@ class Block(nn.Module):
             x = x + g * m
         else:
             x = x + m                       # point stream survives as a residual
+        return x, aux
+
+    def forward(self, x):
+        T = max(1, int(getattr(self, "recur_T", 1) or 1))
+        aux = None
+        for _ in range(T):
+            x, aux = self._mix_residual(x)
+        self.last_recur_T = T
         return x + self.mlp(self.ln2(x)), aux
 
 
@@ -406,6 +443,12 @@ ARMS = {
     "slice_loc_nogumbel_st_topk2_gate": dict(
         kind="slice", norm="mass", mult=1, local=True, nog=True,
         stiefel_ns=True, deslice_topk=2, res_gate=True, qwen_sdpa_gate=True),
+    # Fallback only: shared-weight multi-pass mix (not the primary scatter fix)
+    "slice_loc_nogumbel_recur2": dict(
+        kind="slice", norm="mass", mult=1, local=True, nog=True, recur_T=2),
+    "slice_loc_nogumbel_topk2_recur2": dict(
+        kind="slice", norm="mass", mult=1, local=True, nog=True,
+        deslice_topk=2, recur_T=2),
     # A1, restored 2026-07-29: Fourier position basis in the stem (never run before).
     "slice_four":    dict(kind="slice", norm="mass", mult=1, n_freq=4),
     "slice_four_pt": dict(kind="slice", norm="mass", mult=1, n_freq=4, readout="points"),
@@ -435,6 +478,8 @@ def apply_slice_flags(model, spec):
             mix.qwen_sdpa_gate = True
         if spec.get("res_gate"):
             b.use_res_gate = True
+        if "recur_T" in spec:
+            b.recur_T = int(spec["recur_T"])
     return model
 
 

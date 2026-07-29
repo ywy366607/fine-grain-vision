@@ -24,3 +24,22 @@ keep for history, prefer `line_recon_64_fair*.json` when citing patch Dice.
 
 Spectrum figures in `present/figs/11_*.png` illustrate **patch mean**, not the
 learned Conv2d stem used by `PatchNet`.
+
+## Soft-deslice scatter (primary fix)
+
+| File | Content |
+|------|---------|
+| [`scatter_ablation.json`](scatter_ablation.json) | RGB recon: soft vs top-k write vs gate (support size check) |
+| [`scatter_ablation_gray.json`](scatter_ablation_gray.json) | Luma recon: harder FP regime |
+| [`topk_deslice_ablation.json`](topk_deslice_ablation.json) | Earlier gray 400-step soft vs topk2 vs st+topk2 |
+
+**Design (shipped in `fine_grain.models`):**
+
+1. **Primary:** sparse deslice **write** (`deslice_topk` / threshold); soft mass **read** kept.
+2. **Gate (correct placement):** Qiu et al. arXiv:2505.06708 — σ-gate **after** SDPA on slice tokens; optional residual-stream `x + σ(W x) ⊙ mix`.
+3. **Fallback only:** `recur_T>1` shared-weight multi-pass (Universal-Transformer style), default off.
+
+```bash
+python scripts/scatter_ablation.py --rgb --steps 200 --amp
+python tests/test_deslice_scatter_and_gate.py
+```

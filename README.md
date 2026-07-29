@@ -110,7 +110,7 @@ Open [`present/showcase.html`](present/showcase.html) in a browser for figures (
 - **Baseline fidelity (classification):** patch arms get no extras (no RoPE freebies). `patch4` is *stronger* than real MoonViT (which pixel-shuffles 2×2 before projection) — intentional for classification sweeps.
 - **Line-recon head (dense):** slice uses per-point logits (full HxW). Patch default is **unpatchify** so within-patch structure is expressible; do not cite bilinear-head Dice as pure encoder failure.
 - **Patchify ≠ mean pool:** stem is `Conv2d(3 → dim-2, kernel=p, stride=p)` — a learned linear map over the p²×3 window. Mean pooling is only a special case; high-frequency directions *can* survive in the subspace of the kernel. The hard claim is **s/p-limited capacity/SNR and addressing**, not spectral annihilation.
-- **Slice stack:** mass-norm soft pool (read) + optional sparse deslice write; optional stride-1 DW 3×3 for locality without stride-downsampling.
+- **Slice stack:** mass-norm soft pool (**read**) + optional **sparse deslice write** (primary soft-scatter fix: `deslice_topk` / threshold). Optional Qwen gate: post-SDPA on slice tokens (arXiv:2505.06708) and/or residual-stream `σ(W x) ⊙ mix`. Optional `recur_T` multi-pass is **fallback only**. Stride-1 DW 3×3 for locality without downsampling.
 - **Not in scope:** real OCR/characters (glyph = 4 geometric shapes only), saccadic re-acquisition, multi-hop map reasoning, production VLM training.
 
 ## Citation / lineage

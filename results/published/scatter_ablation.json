@@ -1,0 +1,171 @@
+{
+  "task": "scatter_ablation",
+  "rgb": true,
+  "res": 64,
+  "steps": 200,
+  "batch": 32,
+  "hard_frac": 0.35,
+  "arms": [
+    {
+      "arm": "slice_loc_nogumbel",
+      "history": [
+        {
+          "step": 0,
+          "dice": 0.07746403420002837,
+          "iou": 0.040417190357887094,
+          "fp_mean": 744.921875,
+          "support": 32.0,
+          "seconds": 2.3035919666290283
+        },
+        {
+          "step": 100,
+          "dice": 1.0,
+          "iou": 1.0,
+          "fp_mean": 0.0,
+          "support": 32.0,
+          "seconds": 136.05838179588318,
+          "loss": 0.0008257222943939269
+        },
+        {
+          "step": 200,
+          "dice": 1.0,
+          "iou": 1.0,
+          "fp_mean": 0.0,
+          "support": 32.0,
+          "seconds": 266.7317888736725,
+          "loss": 0.0004386003711260855
+        }
+      ],
+      "final": {
+        "step": 200,
+        "dice": 1.0,
+        "iou": 1.0,
+        "fp_mean": 0.0,
+        "support": 32.0,
+        "seconds": 266.7317888736725,
+        "loss": 0.0004386003711260855
+      }
+    },
+    {
+      "arm": "slice_loc_nogumbel_topk2",
+      "history": [
+        {
+          "step": 0,
+          "dice": 0.07743894407834577,
+          "iou": 0.040403697584797595,
+          "fp_mean": 744.9921875,
+          "support": 2.0,
+          "seconds": 2.3449039459228516
+        },
+        {
+          "step": 100,
+          "dice": 1.0,
+          "iou": 1.0,
+          "fp_mean": 0.0,
+          "support": 2.0,
+          "seconds": 148.60853147506714,
+          "loss": 0.0008257144945673645
+        },
+        {
+          "step": 200,
+          "dice": 1.0,
+          "iou": 1.0,
+          "fp_mean": 0.0,
+          "support": 2.0,
+          "seconds": 294.91066431999207,
+          "loss": 0.0004386021173559129
+        }
+      ],
+      "final": {
+        "step": 200,
+        "dice": 1.0,
+        "iou": 1.0,
+        "fp_mean": 0.0,
+        "support": 2.0,
+        "seconds": 294.91066431999207,
+        "loss": 0.0004386021173559129
+      }
+    },
+    {
+      "arm": "slice_loc_nogumbel_gate",
+      "history": [
+        {
+          "step": 0,
+          "dice": 0.07452228831756295,
+          "iou": 0.038812590677372145,
+          "fp_mean": 815.6796875,
+          "support": 32.0,
+          "seconds": 1.9606380462646484
+        },
+        {
+          "step": 100,
+          "dice": 1.0,
+          "iou": 1.0,
+          "fp_mean": 0.0,
+          "support": 32.0,
+          "seconds": 139.28697562217712,
+          "loss": 0.0008023785194382071
+        },
+        {
+          "step": 200,
+          "dice": 1.0,
+          "iou": 1.0,
+          "fp_mean": 0.0,
+          "support": 32.0,
+          "seconds": 276.61531233787537,
+          "loss": 0.00042476376984268427
+        }
+      ],
+      "final": {
+        "step": 200,
+        "dice": 1.0,
+        "iou": 1.0,
+        "fp_mean": 0.0,
+        "support": 32.0,
+        "seconds": 276.61531233787537,
+        "loss": 0.00042476376984268427
+      }
+    },
+    {
+      "arm": "slice_loc_nogumbel_st_topk2",
+      "history": [
+        {
+          "step": 0,
+          "dice": 0.10351963196146137,
+          "iou": 0.05479342723103553,
+          "fp_mean": 591.1953125,
+          "support": 2.0,
+          "seconds": 2.3557183742523193
+        },
+        {
+          "step": 100,
+          "dice": 1.0,
+          "iou": 1.0,
+          "fp_mean": 0.0,
+          "support": 2.0,
+          "seconds": 150.19674706459045,
+          "loss": 0.0007523966487497091
+        },
+        {
+          "step": 200,
+          "dice": 1.0,
+          "iou": 1.0,
+          "fp_mean": 0.0,
+          "support": 2.0,
+          "seconds": 298.0332143306732,
+          "loss": 0.000409693835536018
+        }
+      ],
+      "final": {
+        "step": 200,
+        "dice": 1.0,
+        "iou": 1.0,
+        "fp_mean": 0.0,
+        "support": 2.0,
+        "seconds": 298.0332143306732,
+        "loss": 0.000409693835536018
+      }
+    }
+  ],
+  "note": "Primary soft-scatter fix is deslice top-k/threshold on WRITE only. Qwen gate: post-SDPA on slice tokens + optional residual-stream res_gate. Recurrence (recur_T) is documented fallback, not primary."
+}
