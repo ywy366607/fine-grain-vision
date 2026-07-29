@@ -338,6 +338,98 @@ def make_kinks(rng, sizes, res=32, mult=1, hard_tile=0, hard_frac=0.0):
     return _done(img, lab, msk)
 
 
+# --------------------------------------------------------------------------- angles
+
+# Interior angles (degrees) for make_angles classification. Order = class index.
+ANGLE_DEGS = (15, 30, 45, 60, 90)
+ANGLE_TO_CLS = {d: i for i, d in enumerate(ANGLE_DEGS)}
+
+
+def _bresenham(y0, x0, y1, x1):
+    """Integer Bresenham line (inclusive endpoints). Yields (y, x)."""
+    y0, x0, y1, x1 = int(y0), int(x0), int(y1), int(x1)
+    dy, dx = abs(y1 - y0), abs(x1 - x0)
+    sy = 1 if y0 < y1 else -1
+    sx = 1 if x0 < x1 else -1
+    err = dx - dy
+    y, x = y0, x0
+    while True:
+        yield y, x
+        if y == y1 and x == x1:
+            break
+        e2 = 2 * err
+        if e2 > -dy:
+            err -= dy
+            x += sx
+        if e2 < dx:
+            err += dx
+            y += sy
+
+
+def _draw_ray(msk, y0, x0, y1, x1, R):
+    """Draw 1px ray into boolean mask; clip to [0, R)."""
+    for y, x in _bresenham(y0, x0, y1, x1):
+        if 0 <= y < R and 0 <= x < R:
+            msk[y, x] = True
+
+
+def _angle_endpoint(cy, cx, deg, length):
+    """Endpoint of a 1px ray of approx `length` pixels at orientation `deg` (screen: +y down)."""
+    rad = np.deg2rad(float(deg))
+    # image coords: x right, y down → standard math angle from +x, clockwise in image
+    dx = length * np.cos(rad)
+    dy = length * np.sin(rad)
+    return int(round(cy + dy)), int(round(cx + dx))
+
+
+def make_angles(rng, sizes, res=64, mult=1, arm_len=0):
+    """Classify interior angle of a 1px pure-red V (two rays from a vertex).
+
+    `sizes[i]` is the interior angle in degrees (must be in ANGLE_DEGS).
+    Label = index in ANGLE_DEGS (15→0 … 90→4). Colour is always SIGNAL red —
+    class is pure geometry. Random global rotation so absolute orientation
+    does not identify the class. Default res=64, 1px strokes.
+
+    Stresses local geometry at the vertex (fine-grain), not colour or length.
+    """
+    n, R = len(sizes), res * mult
+    img, msk = _canvas(rng, n, R, n_blobs=2), np.zeros((n, R, R), bool)
+    lab = np.zeros(n, np.int64)
+    red = SIGNAL[0]  # pure red; no colour→class shortcut
+    # arm length in pixels; leave margin so both rays fit after rotation
+    default_len = max(12, int(0.28 * R))
+    for i in range(n):
+        deg = int(sizes[i])
+        if deg not in ANGLE_TO_CLS:
+            raise ValueError(f"angle {deg} not in ANGLE_DEGS={ANGLE_DEGS}")
+        lab[i] = ANGLE_TO_CLS[deg]
+        L = int(arm_len) if arm_len else int(rng.integers(default_len, default_len + 7))
+        # vertex margin: both arms of length L must stay inside after any rotation
+        margin = L + 2
+        if 2 * margin >= R:
+            margin = max(4, R // 4)
+            L = max(8, margin - 2)
+        cy = int(rng.integers(margin, R - margin))
+        cx = int(rng.integers(margin, R - margin))
+        # random base orientation of the first ray
+        base = float(rng.uniform(0, 360))
+        y1, x1 = _angle_endpoint(cy, cx, base, L)
+        y2, x2 = _angle_endpoint(cy, cx, base + deg, L)
+        # if an endpoint clipped out (rare with margin), shrink L once
+        if not (0 <= y1 < R and 0 <= x1 < R and 0 <= y2 < R and 0 <= x2 < R):
+            L = max(8, L // 2)
+            y1, x1 = _angle_endpoint(cy, cx, base, L)
+            y2, x2 = _angle_endpoint(cy, cx, base + deg, L)
+        pm = np.zeros((R, R), bool)
+        _draw_ray(pm, cy, cx, y1, x1, R)
+        _draw_ray(pm, cy, cx, y2, x2, R)
+        img[i] = np.clip(img[i], 0, 1)
+        for c in range(3):
+            img[i, c][pm] = red[c]
+        msk[i] = pm
+    return _done(img, lab, msk)
+
+
 TASKS = {
     "needle":  dict(fn=make_needle,  sizes=[1, 2, 3, 4, 6, 8], n_cls=4),
     "glyph":   dict(fn=make_glyph,   sizes=[3, 4, 6, 8, 12],   n_cls=4),
@@ -346,5 +438,7 @@ TASKS = {
     # 1px red polyline kink count. k=5..10 → 6 classes (lab = k-5). Standard ViT
     # scale experiments use --res 256 --arms patch16 + ours.
     "kinks":   dict(fn=make_kinks,   sizes=[5, 6, 7, 8, 9, 10], n_cls=6),
+    # 1px red V-angle classification at res=64 (default). Pure geometry.
+    "angles":  dict(fn=make_angles,  sizes=list(ANGLE_DEGS), n_cls=len(ANGLE_DEGS)),
 }
 

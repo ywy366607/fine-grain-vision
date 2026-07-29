@@ -23,10 +23,12 @@ from fine_grain.models import (
     NS_STEPS_DEFAULT,
 )
 from fine_grain.tasks import (
+    ANGLE_DEGS,
     BG,
     N_CLASSES,
     SIGNAL,
     TASKS,
+    make_angles,
     make_connect,
     make_glyph,
     make_kinks,
@@ -44,8 +46,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ARMS", "AdaTempSlice", "AttnPool", "Block", "PatchNet", "SelfAttn", "SliceNet",
-    "TASKS", "apply_slice_flags", "build", "collapse_stats", "coords",
-    "deslice_support_size", "make_connect", "make_glyph", "make_kinks",
+    "ANGLE_DEGS", "TASKS", "apply_slice_flags", "build", "collapse_stats", "coords",
+    "deslice_support_size", "make_angles", "make_connect", "make_glyph", "make_kinks",
     "make_lines", "make_needle", "newton_schulz", "pr_obj", "sparse_deslice_weights",
     "NS_A", "NS_B", "NS_C", "NS_EPS", "NS_STEPS_DEFAULT", "N_CLASSES",
 ]
