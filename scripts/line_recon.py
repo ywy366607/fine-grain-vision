@@ -1,20 +1,25 @@
 """Line reconstruction: image -> polyline mask (BCE + Dice).
 
 Default input is luminance×3 (blocks pure-red channel shortcut on RGB red lines).
+Use --rgb for pure-red RGB input (main published protocol).
+
 Decoder is arm-faithful:
   - slice: Linear on final point stream (post deslice residual) -> HxW logits
-  - patch: tokens on grid -> bilinear upsample to HxW -> 1x1 conv
+  - patch (default): token -> Linear(dim, p*p) -> unpatchify
+    so the head can predict within-patch structure (fair vs bilinear upsample).
+  - patch --patch-decoder bilinear: legacy bilinear + 1x1 (confounds encoder vs head).
 
 Example:
-  python scripts/line_recon.py --arms slice_loc_nogumbel,patch16 --res 64 --steps 600
+  python scripts/line_recon.py --arms slice_loc_nogumbel,patch16 --res 64 --steps 600 --rgb
+  python scripts/line_recon.py --arms patch16 --patch-decoder bilinear  # legacy unfair head
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import time
 import sys
+import time
 
 import numpy as np
 import torch
@@ -30,14 +35,13 @@ import fine_grain as D
 
 def to_gray3(img_rgb: torch.Tensor) -> torch.Tensor:
     """RGB [B,3,H,W] -> luminance stacked to 3 channels (kill pure-red shortcut)."""
-    # Rec. 601 luma
     r, g, b = img_rgb[:, 0], img_rgb[:, 1], img_rgb[:, 2]
     y = 0.299 * r + 0.587 * g + 0.114 * b
     return y.unsqueeze(1).expand(-1, 3, -1, -1).contiguous()
 
 
 def make_batch(rng, B, res, hard_frac, hard_tile, k_list, rgb=False):
-    """rgb=False: luminance×3 (legacy). rgb=True: raw RGB with pure-red polyline."""
+    """rgb=False: luminance×3. rgb=True: raw RGB with pure-red polyline."""
     ks = rng.choice(k_list, size=B)
     imgs, masks = [], []
     for k in ks:
@@ -45,22 +49,21 @@ def make_batch(rng, B, res, hard_frac, hard_tile, k_list, rgb=False):
             rng, np.array([int(k)]), res=res,
             hard_tile=hard_tile, hard_frac=hard_frac,
         )
-        # make_kinks/_done returns mask as [1, H*W] tensor (bool/float)
         if torch.is_tensor(msk):
             m = msk.float().reshape(-1, res, res)
         else:
             m = torch.from_numpy(np.asarray(msk, np.float32)).reshape(-1, res, res)
         imgs.append(im)
         masks.append(m)
-    img = torch.cat(imgs, 0)                 # [B,3,H,W]
-    m = torch.cat(masks, 0)                  # [B,H,W]
+    img = torch.cat(imgs, 0)
+    m = torch.cat(masks, 0)
     if rgb:
         return img, m
     return to_gray3(img), m
 
 
 class SliceSeg(nn.Module):
-    """Slice encoder + per-point 1x logit (uses point stream after blocks)."""
+    """Slice encoder + per-point logit (uses point stream after blocks)."""
 
     def __init__(self, dim=64, depth=3, slice_num=32, local=True, nog=True):
         super().__init__()
@@ -71,7 +74,6 @@ class SliceSeg(nn.Module):
         if nog:
             for b in self.inner.blocks:
                 b.mix.no_gumbel = True
-        # replace cls head with per-point logit
         self.inner.pool = nn.Identity()
         self.inner.head = nn.Identity()
         self.pt_head = nn.Linear(dim, 1)
@@ -86,20 +88,61 @@ class SliceSeg(nn.Module):
             x = x + self.inner.local(g).flatten(2).transpose(1, 2)
         for b in self.inner.blocks:
             x, _ = b(x)
-        logits = self.pt_head(x).squeeze(-1).reshape(B, R, R)
-        return logits
+        return self.pt_head(x).squeeze(-1).reshape(B, R, R)
+
+
+def unpatchify(pix: torch.Tensor, patch: int) -> torch.Tensor:
+    """[B, Hp, Wp, p*p] or [B, T, p*p] with square grid -> [B, H, W] logits.
+
+    Layout matches ViT unpatchify: each token expands to a p×p spatial cell.
+    """
+    if pix.dim() == 3:
+        B, T, pp = pix.shape
+        side = int(T ** 0.5)
+        assert side * side == T, f"token count {T} is not a square grid"
+        assert pp == patch * patch, f"got {pp} channels, expected {patch*patch}"
+        pix = pix.reshape(B, side, side, patch * patch)
+    B, Hp, Wp, pp = pix.shape
+    assert pp == patch * patch
+    # [B, Hp, Wp, p, p] -> [B, Hp*p, Wp*p]
+    pix = pix.reshape(B, Hp, Wp, patch, patch)
+    pix = pix.permute(0, 1, 3, 2, 4).contiguous()
+    return pix.reshape(B, Hp * patch, Wp * patch)
 
 
 class PatchSeg(nn.Module):
-    """Patch encoder + upsample tokens to full-res mask logits."""
+    """Patch encoder + dense mask head.
 
-    def __init__(self, dim=64, depth=3, patch=16):
+    ``decoder`` modes
+    -----------------
+    unpatchify (default, fair)
+        ``token -> Linear(dim, p*p) -> unpatchify``. Can express within-patch
+        structure if the token carries it (Linear is a full-rank map when
+        dim >= p*p; at dim=64, p=16 this is undercomplete — still far better
+        than bilinear which cannot invent p×p modes at all).
+    pixel_shuffle
+        Same capacity as unpatchify via ``Conv2d + PixelShuffle(p)``.
+    bilinear (legacy, unfair)
+        ``tokens -> bilinear upsample -> 1x1 conv``. Smooths to patch-scale
+        blobs; confounds encoder loss with head incapacity.
+    """
+
+    def __init__(self, dim=64, depth=3, patch=16, decoder="unpatchify"):
         super().__init__()
+        assert decoder in ("unpatchify", "pixel_shuffle", "bilinear")
         self.patch = patch
+        self.decoder = decoder
         self.inner = D.PatchNet(dim=dim, depth=depth, patch=patch, n_cls=2)
         self.inner.pool = nn.Identity()
         self.inner.head = nn.Identity()
-        self.proj = nn.Conv2d(dim, 1, kernel_size=1)
+        if decoder == "unpatchify":
+            self.to_pixels = nn.Linear(dim, patch * patch)
+        elif decoder == "pixel_shuffle":
+            # r=patch: out channels must be r^2 for 1-channel mask
+            self.to_grid = nn.Conv2d(dim, patch * patch, kernel_size=1)
+            self.shuffle = nn.PixelShuffle(patch)
+        else:
+            self.proj = nn.Conv2d(dim, 1, kernel_size=1)
 
     def forward(self, img):
         B, _, R, _ = img.shape
@@ -110,9 +153,20 @@ class PatchSeg(nn.Module):
         for b in self.inner.blocks:
             x, _ = b(x)
         # x: [B, T, dim] on Rp x Rp grid
-        feat = x.transpose(1, 2).reshape(B, -1, Rp, Rp)
-        up = F.interpolate(feat, size=(R, R), mode="bilinear", align_corners=False)
-        return self.proj(up).squeeze(1)
+        if self.decoder == "bilinear":
+            feat = x.transpose(1, 2).reshape(B, -1, Rp, Rp)
+            up = F.interpolate(feat, size=(R, R), mode="bilinear", align_corners=False)
+            logits = self.proj(up).squeeze(1)
+        elif self.decoder == "pixel_shuffle":
+            feat = x.transpose(1, 2).reshape(B, -1, Rp, Rp)
+            logits = self.shuffle(self.to_grid(feat)).squeeze(1)
+        else:
+            logits = unpatchify(self.to_pixels(x), self.patch)
+        if logits.shape[-2:] != (R, R):
+            logits = F.interpolate(
+                logits.unsqueeze(1), size=(R, R), mode="bilinear", align_corners=False,
+            ).squeeze(1)
+        return logits
 
 
 def dice_loss_with_logits(logits, target, eps=1e-6):
@@ -157,11 +211,10 @@ def trivial_luma_baseline(img_gray3, target, thr=None):
     return metrics(logits, target)
 
 
-def build_arm(name, dim, depth, slice_num):
+def build_arm(name, dim, depth, slice_num, patch_decoder="unpatchify"):
     # Prefer ARMS-driven flags (topk deslice, Stiefel, gate, …) when name is registered.
     if name in D.ARMS and D.ARMS[name].get("kind") == "slice":
         spec = dict(D.ARMS[name])
-        # SliceSeg needs points readout + local/nog from spec
         m = SliceSeg(
             dim=dim, depth=depth, slice_num=slice_num,
             local=bool(spec.get("local", False)),
@@ -182,13 +235,16 @@ def build_arm(name, dim, depth, slice_num):
         return SliceSeg(dim=dim, depth=depth, slice_num=slice_num, local=False, nog=True)
     if name.startswith("patch"):
         p = int(name.replace("patch", "") or "16")
-        return PatchSeg(dim=dim, depth=depth, patch=p)
+        return PatchSeg(dim=dim, depth=depth, patch=p, decoder=patch_decoder)
     raise ValueError(name)
 
 
 def run_arm(name, args, device):
     torch.manual_seed(args.seed)
-    model = build_arm(name, args.dim, args.depth, args.slice_num).to(device)
+    model = build_arm(
+        name, args.dim, args.depth, args.slice_num,
+        patch_decoder=args.patch_decoder,
+    ).to(device)
     n_par = sum(p.numel() for p in model.parameters() if p.requires_grad)
     use_amp = bool(args.amp and device.type == "cuda")
     if args.compile and device.type == "cuda":
@@ -201,16 +257,17 @@ def run_arm(name, args, device):
     opt = D._make_optimizer(model.parameters(), args.lr, device.type == "cuda")
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.steps)
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
-    # pos_weight ~ negatives/positives; 1px line on 64^2 ≈ 1/50–1/100
     pos_weight = torch.tensor([args.pos_weight], device=device)
 
     k_list = list(range(args.k_min, args.k_max + 1))
     rng = np.random.default_rng(1000 + args.seed)
     history = []
     t0 = time.time()
+    dec = args.patch_decoder if name.startswith("patch") else "point"
     print(
-        f"  [{name}] n_par={n_par} B={args.batch} steps={args.steps} res={args.res} "
-        f"hard_frac={args.hard_frac} pos_w={args.pos_weight}",
+        f"  [{name}] n_par={n_par} decoder={dec} B={args.batch} steps={args.steps} "
+        f"res={args.res} hard_frac={args.hard_frac} pos_w={args.pos_weight} "
+        f"rgb={int(args.rgb)}",
         flush=True,
     )
 
@@ -222,7 +279,9 @@ def run_arm(name, args, device):
         n_left = args.eval_n
         while n_left > 0:
             b = min(args.eval_batch, n_left)
-            x, m = make_batch(rng_e, b, args.res, args.hard_frac, args.hard_tile, k_list)
+            x, m = make_batch(
+                rng_e, b, args.res, args.hard_frac, args.hard_tile, k_list, rgb=args.rgb,
+            )
             x, m = x.to(device), m.to(device)
             with torch.amp.autocast("cuda", enabled=use_amp):
                 logits = model(x)
@@ -243,7 +302,6 @@ def run_arm(name, args, device):
         model.train()
         return out
 
-    # step-0 eval (init)
     st0 = evaluate(0)
     history.append(st0)
     print(
@@ -254,7 +312,9 @@ def run_arm(name, args, device):
 
     model.train()
     for step in range(1, args.steps + 1):
-        x, m = make_batch(rng, args.batch, args.res, args.hard_frac, args.hard_tile, k_list)
+        x, m = make_batch(
+            rng, args.batch, args.res, args.hard_frac, args.hard_tile, k_list, rgb=args.rgb,
+        )
         x, m = x.to(device, non_blocking=True), m.to(device, non_blocking=True)
         with torch.amp.autocast("cuda", enabled=use_amp):
             logits = model(x)
@@ -293,7 +353,7 @@ def run_arm(name, args, device):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arms", default="slice_loc_nogumbel,patch16,patch4")
     ap.add_argument("--res", type=int, default=64)
     ap.add_argument("--batch", type=int, default=32)
@@ -314,6 +374,16 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--amp", action="store_true")
     ap.add_argument("--compile", action="store_true")
+    ap.add_argument(
+        "--rgb", action="store_true",
+        help="raw RGB (pure-red polyline) instead of luminance×3",
+    )
+    ap.add_argument(
+        "--patch-decoder", dest="patch_decoder", default="unpatchify",
+        choices=["unpatchify", "pixel_shuffle", "bilinear"],
+        help="patch mask head (default unpatchify is the fair head; "
+             "bilinear is the legacy unfair baseline)",
+    )
     ap.add_argument("--ckpt_dir", default="checkpoints/line_recon_64")
     ap.add_argument("--out", default="results/line_recon_64.json")
     args = ap.parse_args()
@@ -323,13 +393,21 @@ def main():
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True
 
+    mode = "rgb" if args.rgb else "luminance×3"
     print(
         f"line-recon | res={args.res} B={args.batch} steps={args.steps} "
-        f"arms={args.arms} hard_frac={args.hard_frac} amp={int(args.amp)} "
+        f"arms={args.arms} hard_frac={args.hard_frac} input={mode} "
+        f"patch_decoder={args.patch_decoder} amp={int(args.amp)} "
         f"compile={int(args.compile)} device={device}",
         flush=True,
     )
-    print("input=luminance×3  target=polyline mask  loss=BCE(pos_w)+Dice", flush=True)
+    print("target=polyline mask  loss=BCE(pos_w)+Dice", flush=True)
+    if args.patch_decoder == "bilinear":
+        print(
+            "WARN: --patch-decoder bilinear confounds encoder capacity with a "
+            "head that cannot express within-patch structure.",
+            flush=True,
+        )
 
     results = []
     for name in args.arms.split(","):
@@ -341,11 +419,13 @@ def main():
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     summary = {
-        "task": "line_recon_gray",
+        "task": "line_recon_rgb" if args.rgb else "line_recon_gray",
         "res": args.res,
         "batch": args.batch,
         "steps": args.steps,
         "hard_frac": args.hard_frac,
+        "rgb": bool(args.rgb),
+        "patch_decoder": args.patch_decoder,
         "arms": results,
     }
     with open(args.out, "w", encoding="utf-8") as f:

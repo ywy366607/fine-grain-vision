@@ -317,7 +317,8 @@
   <div class="eyebrow"><i></i> Architecture story · 合成任务可复现</div>
   <h1>看见小东西</h1>
   <p class="lead">
-    固定 patch 网格在入口就把 1px 级结构做成<strong>低通</strong>。
+    固定 patch 网格把局部细节压进有限维 token：<strong>容量与信噪比随 s/p 下降</strong>
+    （不是严格意义的「均值低通抹死」）。
     我们给编码器一条<strong>全点可达 + mass 归一</strong>的细粒度通道：
     token 可以更少，但细线仍有机会被表达。
     <strong>线都重建不了，就别谈夹角与小字。</strong>
@@ -338,13 +339,13 @@
   </div>
   <div class="metric">
     <div class="k">patch16 · 同任务 Dice</div>
-    <div class="v bad mono">0.15</div>
-    <div class="s">FP ~375 / 图 · 网格 16×16</div>
+    <div class="v bad mono">0.15†</div>
+    <div class="s">†旧版 bilinear 头 · 见下方勘误</div>
   </div>
   <div class="metric">
     <div class="k">瓶颈判断</div>
-    <div class="v" style="font-size:1.15rem;color:var(--amber)">谱可达</div>
-    <div class="s">不是 attention 席位多少</div>
+    <div class="v" style="font-size:1.15rem;color:var(--amber)">s/p 容量</div>
+    <div class="s">编码 + 寻址，非「必然抹死」</div>
   </div>
 </div>
 
@@ -414,8 +415,9 @@
   <div class="callout blue">
     <div class="t">关键辨析</div>
     <p>
-      瓶颈往往不是「attention 席位太少」。网格第一层已经做了空间低通；
-      后面 token 再多，也可能只是在糊掉的表示上互看。
+      瓶颈往往不是「attention 席位太少」。网格第一层把 p×p 邻域压成一个 token：
+      <strong>局部高频的信息容量与 SNR 随 s/p 变差</strong>；后面 token 再多，也可能主要在粗尺度结构上互看。
+      真实 stem 是可学习 <code>Conv2d(k=p,s=p)</code>，不是强制均值。
     </p>
   </div>
 </section>
@@ -424,18 +426,20 @@
   <div class="sec-head">
     <div class="num">3</div>
     <h2>谱上差在哪
-      <span class="sub">patch 均值 ≈ 低通；1px 线的高频功率被抹平</span>
+      <span class="sub">图示用 patch 均值；真模型是可学习 stride 卷积</span>
     </h2>
   </div>
   <p>
-    1px 折线几乎全是<strong>高频</strong>。固定 patch 均值（或 stride 卷积）把功率摊进块均值，
-    再放大只是色块——不是线。这是「看不见」的物理图像，不必先怪优化。
+    1px 折线能量大量在<strong>高频</strong>。下图用 <strong>patch 均值</strong>做直观演示：
+    再放大只剩色块。注意：这<strong>不等于</strong>真实 ViT patchify——
+    <code>PatchNet</code> 用的是可学习 <code>Conv2d(kernel=p, stride=p)</code>，核可以保留部分高频方向。
+    更稳妥的说法是：<strong>局部细结构的信息容量与信噪比随 s/p 下降</strong>，而非「必然抹掉 1px 线」。
   </p>
   <div class="fig">
-    <img src="figs/11_patch_spectrum_wipe.png" alt="功率谱抹掉前后" />
+    <img src="figs/11_patch_spectrum_wipe.png" alt="功率谱示意" />
     <div class="cap">
-      <b>图 4</b> · 上：细线与 patch 均值后再放大。下：径向功率谱 + 高低频功率占比——
-      一眼看出谱能力被掐掉。
+      <b>图 4</b> · 上：细线与 <em>patch 均值</em>后再放大（示意图）。下：径向功率谱——
+      均值算子的谱效应；请勿直接等同于学习卷积。
     </div>
   </div>
   <div class="grid-2">
@@ -462,6 +466,19 @@
     res 64 · batch 32 · 400 step · hard≈35% 装入 16×16 · BCE+Dice。
   </p>
 
+  <div class="callout amber">
+    <div class="t">勘误：重建头公平性</div>
+    <p>
+      下表 patch16 数字来自<strong>旧解码器</strong>：
+      <code>tokens → bilinear upsample → 1×1 conv</code>。
+      该头<strong>无法</strong>在 16×16 格内预测独立相对位置，即使 token 保留了线在块内的信息，
+      也只能吐出平滑色块。因此 ~0.15 Dice <strong>同时</strong>混入「编码损失」与「头展不开」。
+      公平对照至少应：
+      <code>token → Linear(dim, 16×16) → unpatchify</code>
+      （或 PixelShuffle / ConvTranspose）。仓库默认已改为 unpatchify；旧数请标 †。
+    </p>
+  </div>
+
   <div class="table-wrap">
     <table>
       <thead>
@@ -484,38 +501,40 @@
           <td class="ok mono">1.000</td>
         </tr>
         <tr>
-          <td>patch16（ViT 网格）</td>
-          <td class="muted">16 token · 16×16 格</td>
-          <td class="no mono">0.153</td>
-          <td class="no mono">0.085</td>
-          <td class="no mono">~375</td>
-          <td class="mid mono">0.685</td>
+          <td>patch16†（ViT 网格）</td>
+          <td class="muted">16 token · <em>bilinear 头</em></td>
+          <td class="no mono">0.153†</td>
+          <td class="no mono">0.085†</td>
+          <td class="no mono">~375†</td>
+          <td class="mid mono">0.685†</td>
         </tr>
       </tbody>
     </table>
   </div>
+  <p class="faint">† 旧版不公平解码器；请用仓库 <code>--patch-decoder unpatchify</code> 重跑后再报绝对 Dice。</p>
 
   <div class="fig">
     <img src="figs/13_line_recon_dice.png" alt="Dice 对比" />
     <div class="cap">
-      <b>图 7</b> · 同为红色折线：slice 干净满分；patch16 仍糊且假阳性高。
-      差距来自<strong>网格下采样</strong>，不是「有没有红」。
+      <b>图 7</b> · 同为红色折线：slice 干净满分；patch16†（bilinear 头）糊且假阳性高。
+      差距<strong>不能</strong>全部归因于「网格编码」——旧头也在拖后腿。
     </div>
   </div>
 
   <div class="fig">
     <img src="figs/12_line_recon_gallery.png" alt="红线重建拼图" />
     <div class="cap">
-      <b>图 8</b> · 从左到右：RGB 输入 · 真值 · <b>slice</b> · <b>patch16</b>。
-      人眼可见的红线，slice 描得干净；patch16 仍碎/糊。
+      <b>图 8</b> · 从左到右：RGB 输入 · 真值 · <b>slice</b> · <b>patch16†</b>。
+      人眼可见的红线，slice 描得干净；右侧 patch 结果请按上勘误阅读。
     </div>
   </div>
 
   <div class="callout green">
     <div class="t">如何读这个结果</div>
     <p>
-      主叙事是<strong>细粒度通道</strong>：全点可达 + mass，让 1px 结构仍可被编码。
-      <strong>Stiefel / Newton–Schulz</strong> 只用于训练中<strong>抑制槽方向坍缩</strong>（共线），
+      主叙事仍是<strong>细粒度通道</strong>：全点可达 + mass，让 1px 结构有机会被编码。
+      但与 patch 的 recon 对比必须<strong>对齐解码器容量</strong>。
+      <strong>Stiefel / Newton–Schulz</strong> 只用于<strong>抑制槽方向坍缩</strong>，
       不是本页与 patch 的主对比轴。合成任务、小模型——定方向，不报 SOTA。
     </p>
   </div>
@@ -591,7 +610,7 @@
       </thead>
       <tbody>
         <tr><td>极小色块 / 1px 点</td><td class="no">随 s/p 掉</td><td class="ok">好</td></tr>
-        <tr><td>1px 纯红折线 (RGB)</td><td class="no">patch16 ≈ 0.15</td><td class="ok">slice ≈ 1.00 · FP≈0</td></tr>
+        <tr><td>1px 纯红折线 (RGB)</td><td class="no">patch16 ≈ 0.15† bilinear 头</td><td class="ok">slice ≈ 1.00 · FP≈0</td></tr>
         <tr><td>字形结构（有局部时）</td><td class="mid">可以</td><td class="ok">完整栈更高</td></tr>
         <tr><td>视觉 token 预算</td><td class="muted">网格常更多</td><td class="ok">可压到很少（如 32）</td></tr>
       </tbody>
@@ -607,15 +626,16 @@
     </h2>
   </div>
   <ol>
-    <li>传统 ViT 入口是<strong>固定低通</strong>；细线在高频功率上被抹掉。</li>
-    <li><strong>全点 + mass</strong> 提供细粒度<strong>通道</strong>：RGB 红线 recon 上 slice 干净满分，patch16 仍差。</li>
-    <li><strong>Stiefel</strong> 用于<strong>防槽方向坍缩</strong>；编码完备性先于夹角 / 小字 / 场景推理。</li>
+    <li>固定 patch 网格下，局部细结构的<strong>容量与 SNR 随 s/p 变差</strong>（学习卷积 ≠ 强制均值低通）。</li>
+    <li><strong>全点 + mass</strong> 提供细粒度<strong>通道</strong>；recon 对比须用<strong>可 unpatchify 的头</strong>，否则低估 patch。</li>
+    <li><strong>Stiefel</strong> 用于<strong>防槽方向坍缩</strong>；编码完备性先于夹角 / 真字符 / 场景推理。</li>
   </ol>
   <div class="callout amber">
     <div class="t">边界</div>
     <p>
       本页是架构故事与合成证据，不是大规模预训练 SOTA。
-      复现与细节见仓库 <code>README.md</code>；图可由 <code>present/</code> 下脚本重生成。
+      glyph = 4 类几何形，<strong>不是 OCR 真字符</strong>。
+      复现与勘误见仓库 <code>README.md</code>。
     </p>
   </div>
 </section>

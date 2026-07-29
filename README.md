@@ -27,8 +27,8 @@ This repo measures both sides under a matched token budget:
 | **P6** | Thin **lines** survive patch grids; **point-like** needles do not — fine ≠ small. |
 | **P7** | **Mass normalization** is the size-invariance mechanism (not per-pixel tokens alone). |
 | **Oracle** | Glyph memorization failure is largely **optimization** (Gumbel noise), not expressivity. |
-| **Line recon** | On pure-red RGB polylines, slice (+ optional Stiefel) reconstructs near-perfect masks; **patch16** collapses (low Dice, high FP). Stiefel mainly **anti-collapse**, not a new recon magic. |
-| **Caveat** | Grayscale / luma inputs allow a **~0.299 intensity shortcut** on red lines — prefer RGB for honest recon. |
+| **Line recon** | On pure-red RGB polylines, slice (+ optional Stiefel) reconstructs near-perfect masks under a dense head. Early **patch16 ~0.15 Dice** used a **bilinear upsample + 1×1** head — that number confounds encoder and decoder; see caveats. Stiefel is mainly **anti-collapse**, not recon magic. |
+| **Caveats** | (1) Prefer **RGB** over luma (luma≈0.299 shortcut on red lines). (2) Fair patch recon needs a head that can emit **within-patch** structure: default is now `token → Linear(dim, p²) → unpatchify` (or PixelShuffle); `--patch-decoder bilinear` is the legacy unfair head. (3) Spectrum wipe figure uses **patch mean** as an illustration — real `PatchNet` stem is **learned** `Conv2d(k=p,s=p)`, not mean low-pass; say **capacity/SNR of local high-freq structure falls with s/p**, not “inevitably wipes 1px lines.” |
 
 Published JSON snapshots live in [`results/published/`](results/published/).
 
@@ -75,8 +75,10 @@ python scripts/train_benchmark.py --task needle --arms patch4,slice --steps 50 -
 # glyph shape task
 python scripts/train_benchmark.py --task glyph --arms patch4,slice_loc_nogumbel --steps 1500
 
-# line reconstruction @ 64^2
-python scripts/line_recon.py --arms slice_loc_nogumbel,patch16 --res 64 --steps 600
+# line reconstruction @ 64^2 (fair patch head = unpatchify by default)
+python scripts/line_recon.py --arms slice_loc_nogumbel,patch16 --res 64 --steps 600 --rgb
+# legacy unfair patch head (bilinear + 1x1), for comparing old numbers only
+python scripts/line_recon.py --arms patch16 --patch-decoder bilinear --rgb
 
 # optional: materialize kinks dataset to disk
 python scripts/build_kinks_dataset.py --out data/kinks256 --n_train 6000 --n_val 600
@@ -105,9 +107,11 @@ Open [`present/showcase.html`](present/showcase.html) in a browser for figures (
 
 ## Design notes
 
-- **Baseline fidelity:** patch arms get no extras (no RoPE freebies, no pixel-shuffle). `patch4` is *stronger* than real MoonViT (which pixel-shuffles 2×2 before projection) — intentional.
+- **Baseline fidelity (classification):** patch arms get no extras (no RoPE freebies). `patch4` is *stronger* than real MoonViT (which pixel-shuffles 2×2 before projection) — intentional for classification sweeps.
+- **Line-recon head (dense):** slice uses per-point logits (full HxW). Patch default is **unpatchify** so within-patch structure is expressible; do not cite bilinear-head Dice as pure encoder failure.
+- **Patchify ≠ mean pool:** stem is `Conv2d(3 → dim-2, kernel=p, stride=p)` — a learned linear map over the p²×3 window. Mean pooling is only a special case; high-frequency directions *can* survive in the subspace of the kernel. The hard claim is **s/p-limited capacity/SNR and addressing**, not spectral annihilation.
 - **Slice stack:** mass-norm soft pool (read) + optional sparse deslice write; optional stride-1 DW 3×3 for locality without stride-downsampling.
-- **Not in scope:** saccadic re-acquisition, multi-hop map reasoning, production VLM training.
+- **Not in scope:** real OCR/characters (glyph = 4 geometric shapes only), saccadic re-acquisition, multi-hop map reasoning, production VLM training.
 
 ## Citation / lineage
 
