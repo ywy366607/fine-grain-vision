@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>看见小东西 · 细粒度视觉编码</title>
+<style>
+  :root {
+    --bg: #05080f;
+    --bg2: #0a101c;
+    --card: rgba(15, 23, 42, 0.72);
+    --card-solid: #0f172a;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --faint: #64748b;
+    --line: rgba(148, 163, 184, 0.14);
+    --line2: rgba(148, 163, 184, 0.22);
+    --blue: #38bdf8;
+    --blue-dim: rgba(56, 189, 248, 0.12);
+    --green: #34d399;
+    --green-dim: rgba(52, 211, 153, 0.12);
+    --amber: #fbbf24;
+    --amber-dim: rgba(251, 191, 36, 0.12);
+    --red: #f87171;
+    --red-dim: rgba(248, 113, 113, 0.12);
+    --violet: #a78bfa;
+    --radius: 18px;
+    --shadow: 0 18px 50px rgba(0,0,0,.35);
+    --max: 980px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    color: var(--text);
+    line-height: 1.75;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(56,189,248,.10), transparent 55%),
+      radial-gradient(900px 500px at 100% 0%, rgba(167,139,250,.10), transparent 50%),
+      radial-gradient(800px 400px at 50% 100%, rgba(52,211,153,.06), transparent 50%),
+      var(--bg);
+  }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 28px 20px 96px; }
+
+  /* top bar */
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    margin: 0 -20px 28px;
+    padding: 12px 20px;
+    backdrop-filter: blur(14px);
+    background: rgba(5, 8, 15, 0.78);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar-inner {
+    max-width: var(--max); margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .brand {
+    font-size: 0.86rem; font-weight: 650; letter-spacing: 0.02em;
+    color: var(--text); white-space: nowrap;
+  }
+  .brand span { color: var(--blue); }
+  nav { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+  nav a {
+    color: var(--muted); text-decoration: none; font-size: 0.78rem;
+    padding: 6px 10px; border-radius: 999px; border: 1px solid transparent;
+    transition: .15s ease;
+  }
+  nav a:hover { color: var(--text); border-color: var(--line2); background: rgba(255,255,255,.03); }
+
+  /* hero */
+  .hero {
+    position: relative;
+    padding: 40px 32px 36px;
+    border-radius: calc(var(--radius) + 4px);
+    border: 1px solid var(--line2);
+    background:
+      linear-gradient(145deg, rgba(30,41,59,.9), rgba(15,23,42,.95));
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    margin-bottom: 28px;
+  }
+  .hero::after {
+    content: ""; position: absolute; inset: auto -20% -40% auto;
+    width: 420px; height: 420px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(56,189,248,.18), transparent 65%);
+    pointer-events: none;
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 0.75rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--blue); font-weight: 650; margin-bottom: 14px;
+  }
+  .eyebrow i {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 0 4px rgba(52,211,153,.15);
+  }
+  .hero h1 {
+    margin: 0 0 14px; font-size: clamp(1.7rem, 4vw, 2.35rem);
+    letter-spacing: -0.03em; line-height: 1.2; font-weight: 750;
+  }
+  .hero .lead {
+    margin: 0; max-width: 40em; color: var(--muted); font-size: 1.05rem;
+  }
+  .hero-meta {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px;
+  }
+  .chip {
+    font-size: 0.78rem; color: var(--muted);
+    border: 1px solid var(--line2); background: rgba(0,0,0,.2);
+    padding: 6px 11px; border-radius: 999px;
+  }
+  .chip b { color: var(--text); font-weight: 650; }
+
+  /* metrics strip */
+  .metrics {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    margin: -8px 0 28px;
+  }
+  @media (max-width: 720px) {
+    .metrics { grid-template-columns: 1fr; }
+    .topbar-inner { flex-direction: column; align-items: flex-start; }
+    nav { justify-content: flex-start; }
+  }
+  .metric {
+    padding: 16px 16px 14px; border-radius: 14px;
+    border: 1px solid var(--line); background: var(--card);
+    backdrop-filter: blur(8px);
+  }
+  .metric .k { font-size: 0.75rem; color: var(--faint); margin-bottom: 6px; }
+  .metric .v {
+    font-size: 1.55rem; font-weight: 750; letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric .v.good { color: var(--green); }
+  .metric .v.bad { color: var(--red); }
+  .metric .s { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+
+  /* sections */
+  section {
+    margin: 0 0 18px; padding: 26px 24px 28px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--card);
+    backdrop-filter: blur(8px);
+  }
+  .sec-head {
+    display: flex; align-items: flex-start; gap: 12px;
+    margin-bottom: 14px;
+  }
+  .num {
+    flex: 0 0 auto;
+    width: 2rem; height: 2rem; border-radius: 10px;
+    display: grid; place-items: center;
+    font-size: 0.85rem; font-weight: 700;
+    background: var(--blue-dim); color: var(--blue);
+    border: 1px solid rgba(56,189,248,.25);
+  }
+  h2 {
+    margin: 0; font-size: 1.28rem; letter-spacing: -0.02em; font-weight: 700;
+  }
+  h2 .sub {
+    display: block; margin-top: 4px;
+    font-size: 0.88rem; font-weight: 500; color: var(--muted); letter-spacing: 0;
+  }
+  h3 {
+    margin: 22px 0 10px; font-size: 0.98rem; font-weight: 650;
+    color: #cbd5e1;
+  }
+  p { margin: 0.55em 0; color: #cbd5e1; }
+  ul, ol { margin: 0.45em 0 0.7em; padding-left: 1.15em; color: #cbd5e1; }
+  li { margin: 0.35em 0; }
+  strong { color: var(--text); font-weight: 650; }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); font-size: 0.86rem; }
+
+  /* callouts */
+  .callout {
+    margin: 16px 0 4px; padding: 14px 16px;
+    border-radius: 12px; border: 1px solid var(--line);
+    background: rgba(0,0,0,.18);
+  }
+  .callout.green { border-color: rgba(52,211,153,.28); background: var(--green-dim); }
+  .callout.blue { border-color: rgba(56,189,248,.28); background: var(--blue-dim); }
+  .callout.amber { border-color: rgba(251,191,36,.28); background: var(--amber-dim); }
+  .callout .t {
+    font-size: 0.78rem; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; margin-bottom: 6px;
+  }
+  .callout.green .t { color: var(--green); }
+  .callout.blue .t { color: var(--blue); }
+  .callout.amber .t { color: var(--amber); }
+  .callout p { margin: 0; color: #e2e8f0; font-size: 0.95rem; }
+
+  /* figures */
+  .fig {
+    margin: 16px 0 8px; padding: 14px;
+    border-radius: 14px; border: 1px solid var(--line);
+    background: #070c16;
+  }
+  .fig img {
+    display: block; width: 100%; height: auto;
+    border-radius: 8px; background: #0b1220;
+  }
+  .cap {
+    margin-top: 10px; padding: 0 2px;
+    font-size: 0.86rem; color: var(--muted); text-align: left; line-height: 1.55;
+  }
+  .cap b { color: #cbd5e1; }
+
+  /* two col */
+  .grid-2 {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px;
+  }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* cards for scenarios */
+  .scene {
+    padding: 14px 14px 12px; border-radius: 12px;
+    border: 1px solid var(--line); background: rgba(0,0,0,.16);
+  }
+  .scene h4 {
+    margin: 0 0 6px; font-size: 0.92rem; color: var(--text); font-weight: 650;
+  }
+  .scene p { margin: 0; font-size: 0.86rem; color: var(--muted); }
+
+  /* ladder */
+  .ladder {
+    display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px;
+  }
+  .ladder span {
+    font-size: 0.8rem; padding: 7px 11px; border-radius: 999px;
+    border: 1px solid var(--line2); color: var(--muted); background: rgba(0,0,0,.2);
+  }
+  .ladder span.on {
+    color: var(--green); border-color: rgba(52,211,153,.35); background: var(--green-dim);
+  }
+  .ladder span.off {
+    color: var(--red); border-color: rgba(248,113,113,.3); background: var(--red-dim);
+    text-decoration: line-through; opacity: .85;
+  }
+
+  /* table */
+  .table-wrap { overflow-x: auto; margin: 14px 0 6px; border-radius: 12px; border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th, td { padding: 11px 13px; text-align: left; border-bottom: 1px solid var(--line); }
+  th {
+    background: #0b1220; color: #93c5fd; font-weight: 650; font-size: 0.8rem;
+    letter-spacing: .03em;
+  }
+  tr:last-child td { border-bottom: 0; }
+  td { background: rgba(11,18,32,.55); color: #cbd5e1; }
+  tr:hover td { background: rgba(30,41,59,.55); }
+  .ok { color: var(--green); font-weight: 700; }
+  .no { color: var(--red); font-weight: 700; }
+  .mid { color: var(--amber); font-weight: 650; }
+  .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, monospace; }
+
+  /* method steps */
+  .steps { display: grid; gap: 10px; margin: 14px 0; }
+  .step {
+    display: grid; grid-template-columns: 36px 1fr; gap: 12px;
+    padding: 12px 14px; border-radius: 12px;
+    border: 1px solid var(--line); background: rgba(0,0,0,.14);
+  }
+  .step .i {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: grid; place-items: center; font-weight: 750;
+    background: var(--violet); color: #0f172a; font-size: 0.9rem;
+  }
+  .step h4 { margin: 0 0 3px; font-size: 0.95rem; }
+  .step p { margin: 0; font-size: 0.86rem; color: var(--muted); }
+
+  .eq {
+    margin: 14px 0; padding: 16px;
+    text-align: center; border-radius: 12px;
+    border: 1px solid rgba(167,139,250,.3);
+    background: linear-gradient(180deg, rgba(167,139,250,.08), rgba(0,0,0,.2));
+    font-size: 1.12rem; letter-spacing: 0.02em;
+  }
+  .eq small { display: block; margin-top: 8px; font-size: 0.82rem; color: var(--muted); }
+
+  footer {
+    margin-top: 28px; padding-top: 18px;
+    border-top: 1px solid var(--line);
+    color: var(--faint); font-size: 0.82rem;
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px;
+  }
+  code {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.86em; color: #bae6fd;
+    background: rgba(56,189,248,.08); padding: 1px 6px; border-radius: 5px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">细粒度视觉编码 · <span>研究展示</span></div>
+    <nav>
+      <a href="#story">一句话</a>
+      <a href="#why">动机</a>
+      <a href="#vit">ViT 现状</a>
+      <a href="#spectrum">谱证据</a>
+      <a href="#recon">红线重建</a>
+      <a href="#method">方法</a>
+      <a href="#more">其它结果</a>
+      <a href="#takeaway">结论</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero" id="story">
+  <div class="eyebrow"><i></i> Architecture story · 合成任务可复现</div>
+  <h1>看见小东西</h1>
+  <p class="lead">
+    固定 patch 网格在入口就把 1px 级结构做成<strong>低通</strong>。
+    我们给编码器一条<strong>全点可达 + mass 归一</strong>的细粒度通道：
+    token 可以更少，但细线仍有机会被表达。
+    <strong>线都重建不了，就别谈夹角与小字。</strong>
+  </p>
+  <div class="hero-meta">
+    <span class="chip">对照 <b>slice vs patch16</b></span>
+    <span class="chip">主证据 <b>RGB 纯红 1px 折线</b></span>
+    <span class="chip">ST <b>仅防方向坍缩</b></span>
+    <span class="chip">规模 <b>小模型 · 非 SOTA 榜</b></span>
+  </div>
+</header>
+
+<div class="metrics">
+  <div class="metric">
+    <div class="k">slice · RGB 红线 Dice</div>
+    <div class="v good mono">1.00</div>
+    <div class="s">FP ≈ 0 · 400 step · res 64</div>
+  </div>
+  <div class="metric">
+    <div class="k">patch16 · 同任务 Dice</div>
+    <div class="v bad mono">0.15</div>
+    <div class="s">FP ~375 / 图 · 网格 16×16</div>
+  </div>
+  <div class="metric">
+    <div class="k">瓶颈判断</div>
+    <div class="v" style="font-size:1.15rem;color:var(--amber)">谱可达</div>
+    <div class="s">不是 attention 席位多少</div>
+  </div>
+</div>
+
+<section id="why">
+  <div class="sec-head">
+    <div class="num">1</div>
+    <h2>动机
+      <span class="sub">小不等于不重要；编码阶段抹掉就回不来</span>
+    </h2>
+  </div>
+  <p>
+    人看不清会多看几眼。模型若在第一层把细节糊进大格子，后面注意力再强，
+    也只能围着<strong>背景主能量</strong>转——不是「不聪明」，是<strong>通道先断了</strong>。
+  </p>
+  <div class="grid-2">
+    <div class="scene">
+      <h4>广告 / 合规小字</h4>
+      <p>大字促销好认；底部免责声明又小又淡，最容易被网格淹没。</p>
+    </div>
+    <div class="scene">
+      <h4>OCR · UI · 示意图</h4>
+      <p>角标、站名、细线标注：人能扫到，模型常先被背景吸走。</p>
+    </div>
+    <div class="scene">
+      <h4>科研图局部几何</h4>
+      <p>尖角 / 接触角往往只占几个像素，决策却依赖它们。</p>
+    </div>
+    <div class="scene">
+      <h4>能力阶梯</h4>
+      <p>点 → 线 → 角 → 字 → 场景。折线都立不住，夹角无从谈起。</p>
+    </div>
+  </div>
+  <div class="ladder" aria-label="能力阶梯">
+    <span class="on">点</span>
+    <span class="on">折线</span>
+    <span class="off">夹角</span>
+    <span class="off">字形</span>
+    <span class="off">场景</span>
+  </div>
+  <p class="faint">绿：本页主证据停在「折线可达」。灰划线：更高层，线失败则免谈。</p>
+  <div class="fig">
+    <img src="figs/08_ad_fineprint.png" alt="广告小字动机" />
+    <div class="cap"><b>图 1</b> · 大字好看见；真正难的是底部小字。</div>
+  </div>
+  <div class="fig">
+    <img src="figs/09_apps.png" alt="应用场景" />
+    <div class="cap"><b>图 2</b> · 地铁细线、科研角点、OCR——都要求编码别先把细结构抹掉。</div>
+  </div>
+</section>
+
+<section id="vit">
+  <div class="sec-head">
+    <div class="num">2</div>
+    <h2>ViT / 主流视觉前端在做什么
+      <span class="sub">任意分辨率 ≠ 免 patch；看不清就加分辨率、付 token</span>
+    </h2>
+  </div>
+  <ol>
+    <li>固定 <strong>patch</strong> 切图（常见 14–16；合并后 LLM 侧常约 28×28 像素/token）；</li>
+    <li>在网格 token 上做自注意力；</li>
+    <li>细节不够时：抬输入分辨率、堆 token（Kimi MoonViT 等亦是此路线）。</li>
+  </ol>
+  <div class="fig">
+    <img src="figs/04_arch.png" alt="路径对比" />
+    <div class="cap"><b>图 3</b> · 上：传统网格路径。下：全点 + 局部 + mass 压缩，保留点流残差。</div>
+  </div>
+  <div class="callout blue">
+    <div class="t">关键辨析</div>
+    <p>
+      瓶颈往往不是「attention 席位太少」。网格第一层已经做了空间低通；
+      后面 token 再多，也可能只是在糊掉的表示上互看。
+    </p>
+  </div>
+</section>
+
+<section id="spectrum">
+  <div class="sec-head">
+    <div class="num">3</div>
+    <h2>谱上差在哪
+      <span class="sub">patch 均值 ≈ 低通；1px 线的高频功率被抹平</span>
+    </h2>
+  </div>
+  <p>
+    1px 折线几乎全是<strong>高频</strong>。固定 patch 均值（或 stride 卷积）把功率摊进块均值，
+    再放大只是色块——不是线。这是「看不见」的物理图像，不必先怪优化。
+  </p>
+  <div class="fig">
+    <img src="figs/11_patch_spectrum_wipe.png" alt="功率谱抹掉前后" />
+    <div class="cap">
+      <b>图 4</b> · 上：细线与 patch 均值后再放大。下：径向功率谱 + 高低频功率占比——
+      一眼看出谱能力被掐掉。
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="fig" style="margin:0">
+      <img src="figs/01_patch_needle.png" alt="小点落在 patch" />
+      <div class="cap"><b>图 5</b> · 1px 落在格子里，真实 ViT 格子更大时更差。</div>
+    </div>
+    <div class="fig" style="margin:0">
+      <img src="figs/02_snr_bar.png" alt="面积份额" />
+      <div class="cap"><b>图 6</b> · 无 mass 时，小目标只是 token 里的小扰动（s/p）。</div>
+    </div>
+  </div>
+</section>
+
+<section id="recon">
+  <div class="sec-head">
+    <div class="num">4</div>
+    <h2>主证据：RGB 纯红 1px 折线重建
+      <span class="sub">slice vs patch16 · 同数据协议 · 非灰度</span>
+    </h2>
+  </div>
+  <p>
+    输入<strong>原图 RGB</strong>（纯红 1px 折线），重建线 mask。
+    res 64 · batch 32 · 400 step · hard≈35% 装入 16×16 · BCE+Dice。
+  </p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>方法</th>
+          <th>结构</th>
+          <th>Dice ↑</th>
+          <th>IoU</th>
+          <th>FP / 图</th>
+          <th>Recall</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>slice + local + mass</strong></td>
+          <td class="muted">32 槽 + 点流 · ST 防塌</td>
+          <td class="ok mono">1.000</td>
+          <td class="ok mono">1.000</td>
+          <td class="ok mono">0</td>
+          <td class="ok mono">1.000</td>
+        </tr>
+        <tr>
+          <td>patch16（ViT 网格）</td>
+          <td class="muted">16 token · 16×16 格</td>
+          <td class="no mono">0.153</td>
+          <td class="no mono">0.085</td>
+          <td class="no mono">~375</td>
+          <td class="mid mono">0.685</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="fig">
+    <img src="figs/13_line_recon_dice.png" alt="Dice 对比" />
+    <div class="cap">
+      <b>图 7</b> · 同为红色折线：slice 干净满分；patch16 仍糊且假阳性高。
+      差距来自<strong>网格下采样</strong>，不是「有没有红」。
+    </div>
+  </div>
+
+  <div class="fig">
+    <img src="figs/12_line_recon_gallery.png" alt="红线重建拼图" />
+    <div class="cap">
+      <b>图 8</b> · 从左到右：RGB 输入 · 真值 · <b>slice</b> · <b>patch16</b>。
+      人眼可见的红线，slice 描得干净；patch16 仍碎/糊。
+    </div>
+  </div>
+
+  <div class="callout green">
+    <div class="t">如何读这个结果</div>
+    <p>
+      主叙事是<strong>细粒度通道</strong>：全点可达 + mass，让 1px 结构仍可被编码。
+      <strong>Stiefel / Newton–Schulz</strong> 只用于训练中<strong>抑制槽方向坍缩</strong>（共线），
+      不是本页与 patch 的主对比轴。合成任务、小模型——定方向，不报 SOTA。
+    </p>
+  </div>
+</section>
+
+<section id="method">
+  <div class="sec-head">
+    <div class="num">5</div>
+    <h2>方法：可插入 ViT 的细粒度补丁
+      <span class="sub">少 token · 保幅度 · 可选防塌</span>
+    </h2>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <div class="i">1</div>
+      <div>
+        <h4>Stride-1 局部混合</h4>
+        <p>深度可分离 3×3：先在邻域提结构，不先做降采样。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="i">2</div>
+      <div>
+        <h4>软分组 + mass 归一</h4>
+        <p>按内容分进少量槽；分母用分配质量，小目标也能满幅度。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="i">3</div>
+      <div>
+        <h4>稳定路由</h4>
+        <p>关闭 Gumbel 等有害噪声；默认例如 32 个摘要 token 读出。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="i">4</div>
+      <div>
+        <h4>Stiefel / NS（可选）</h4>
+        <p>只作防方向坍缩；系数对齐 <code>torch.optim.Muon</code>。不管「红线 vs patch」主结论。</p>
+      </div>
+    </div>
+  </div>
+  <div class="eq">
+    s<sub>m</sub> = Σ<sub>i</sub> w<sub>im</sub> x<sub>i</sub> &nbsp;/&nbsp; Σ<sub>i</sub> w<sub>im</sub>
+    <small>质量归一管幅度 · ST 管多槽方向 · 二者正交</small>
+  </div>
+</section>
+
+<section id="more">
+  <div class="sec-head">
+    <div class="num">6</div>
+    <h2>其它对照
+      <span class="sub">小点 · s/p · 字形 · 辅助证据</span>
+    </h2>
+  </div>
+  <p class="muted">合成任务、小模型、可复现——与红线主证据互补，不与百亿视觉塔比绝对分。</p>
+  <div class="fig">
+    <img src="figs/05_needle_curve.png" alt="needle" />
+    <div class="cap"><b>图 9</b> · 小点检测：网格随尺寸掉点；mass-slice 全尺寸稳住。</div>
+  </div>
+  <div class="fig">
+    <img src="figs/05b_sp_scaling.png" alt="s/p" />
+    <div class="cap"><b>图 10</b> · 精度跟 s/p：格子越大，同样 1px 越难。</div>
+  </div>
+  <div class="fig">
+    <img src="figs/06_glyph_ablation.png" alt="glyph" />
+    <div class="cap"><b>图 11</b> · 字形：局部 + 稳定分配 + 可读 slice 为最小成功栈。</div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>能力</th><th>patch 网格</th><th>我们的栈</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>极小色块 / 1px 点</td><td class="no">随 s/p 掉</td><td class="ok">好</td></tr>
+        <tr><td>1px 纯红折线 (RGB)</td><td class="no">patch16 ≈ 0.15</td><td class="ok">slice ≈ 1.00 · FP≈0</td></tr>
+        <tr><td>字形结构（有局部时）</td><td class="mid">可以</td><td class="ok">完整栈更高</td></tr>
+        <tr><td>视觉 token 预算</td><td class="muted">网格常更多</td><td class="ok">可压到很少（如 32）</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="takeaway">
+  <div class="sec-head">
+    <div class="num">7</div>
+    <h2>结论
+      <span class="sub">带走三句话</span>
+    </h2>
+  </div>
+  <ol>
+    <li>传统 ViT 入口是<strong>固定低通</strong>；细线在高频功率上被抹掉。</li>
+    <li><strong>全点 + mass</strong> 提供细粒度<strong>通道</strong>：RGB 红线 recon 上 slice 干净满分，patch16 仍差。</li>
+    <li><strong>Stiefel</strong> 用于<strong>防槽方向坍缩</strong>；编码完备性先于夹角 / 小字 / 场景推理。</li>
+  </ol>
+  <div class="callout amber">
+    <div class="t">边界</div>
+    <p>
+      本页是架构故事与合成证据，不是大规模预训练 SOTA。
+      复现与细节见仓库 <code>README.md</code>；图可由 <code>present/</code> 下脚本重生成。
+    </p>
+  </div>
+</section>
+
+<footer>
+  <span>细粒度视觉编码 · 学术展示页 · 可离线打开</span>
+  <span>主证据：RGB 1px 红线 · slice vs patch16</span>
+</footer>
+
+</div>
+</body>
+</html>

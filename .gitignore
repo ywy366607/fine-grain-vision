@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Tooling / IDE
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+*.swp
+
+# Local experiment artifacts (large; regenerate with scripts/)
+data/
+checkpoints/
+results/*
+!results/published/
+!results/published/**
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# One-shot helpers
+_cleanup2.py
+_restructure.py
+_finish_cleanup.py

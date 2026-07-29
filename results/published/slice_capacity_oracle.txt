@@ -1,0 +1,11 @@
+oracle capacity | task=glyph | 128 FIXED images | chance=0.25 | wd=0 lr=0.001
+train accuracy on those exact images (capacity to FIT, not generalisation)
+
+arm               sec     @300     @600     @900    @1200
+patch4             14    1.000    1.000    1.000    1.000
+slice             253    0.352    0.430    0.547    0.812
+slice_nogumbel    205    0.414    0.617    1.000    1.000
+slice_pt          285    0.422    0.539    0.570    0.664
+
+chance=0.25. slice near chance while patch4 ~1.0 -> cannot EXPRESS it; close the line.
+slice ~1.0 -> expressivity fine, the failure is optimisation/generalisation (Gumbel / Ada-Temp / budget).

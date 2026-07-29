@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fine-grain-vision"
+version = "0.1.0"
+description = "Content-adaptive slice pooling vs fixed patch grids for fine-grained vision"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Fine-Grain Vision contributors" }]
+dependencies = [
+  "torch>=2.1",
+  "numpy>=1.24",
+  "Pillow>=10.0",
+  "matplotlib>=3.7",
+]
+keywords = ["vision", "transformer", "transolver", "patch", "fine-grained"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+include = ["fine_grain*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

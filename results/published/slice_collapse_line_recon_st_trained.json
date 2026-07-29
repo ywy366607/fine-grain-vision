@@ -1,0 +1,23 @@
+{
+  "ckpt": "checkpoints/line_recon_64_st/slice_loc_nogumbel_st_res64_seed0_step00600.pt",
+  "ns_eval": false,
+  "collapse": {
+    "PR_mass": 17.60587763786316,
+    "H_mass": 0.9044606760144234,
+    "H_point": 0.8682518154382706,
+    "cos_tok": 0.9587718099355698,
+    "r99": 30.087890625
+  },
+  "gram_full_dim": {
+    "cos_flat": 0.9618042260408401,
+    "cos_flat_abs": 0.9618042260408401,
+    "gram_fro_off": 30.303608417510986
+  },
+  "read": {
+    "PR_mass": "~1 dead / ~G spread",
+    "H_mass": "~0 delta / ~1 uniform mass",
+    "cos_tok": "~1 direction collapse / ~0 diverse (per-head)",
+    "cos_flat": "pairwise cos in full C=h*dh (Stiefel ambient)",
+    "gram_fro_off": "||G-I||_F style (lower = closer to Stiefel)"
+  }
+}
