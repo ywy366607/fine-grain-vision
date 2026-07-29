@@ -2,32 +2,25 @@
 
 JSON / text snapshots that back claims in the root README.
 
-## Line-recon caveat (important)
+## Line recon — fair re-run (primary)
 
-`line_recon_64*.json` / RGB tables quoted in the showcase used a **legacy patch
-decoder**: bilinear upsample of token features + 1×1 conv. That head **cannot**
-emit independent per-pixel structure inside a 16×16 cell, so low patch Dice mixes
+| File | Content |
+|------|---------|
+| [`line_recon_64_fair.json`](line_recon_64_fair.json) | Summary: slice vs patch16, **unpatchify** head, RGB |
+| [`line_recon_64_fair_patch16.json`](line_recon_64_fair_patch16.json) | Full patch16 history (600 steps) |
 
-1. what the **encoder** fails to keep, and
-2. what the **decoder** cannot unfold.
+| Arm | Head | Dice | IoU | Recall | notes |
+|-----|------|------|-----|--------|-------|
+| slice_loc_nogumbel | point | **1.000** | 1.000 | 1.000 | ~step 100 |
+| patch16 | **unpatchify** | **0.215** | 0.121 | 0.880 | 600 steps |
+| patch16 (legacy) | bilinear | ~0.153 | ~0.085 | ~0.685 | old published |
 
-Current default in `scripts/line_recon.py` is the fair head:
+**Takeaway:** fixing the decoder lifts patch a little (0.15→0.22); slice remains near-perfect. Gap is **not only** an unfair head.
 
-```text
-token → Linear(dim, p×p) → unpatchify
-```
+## Legacy files
 
-(`--patch-decoder bilinear` reproduces the old unfair setup.)
-
-Re-run before citing new absolute patch Dice numbers:
-
-```bash
-python scripts/line_recon.py --arms slice_loc_nogumbel,patch16 --res 64 --steps 600 --rgb \
-  --patch-decoder unpatchify --out results/line_recon_64_fair.json
-```
+`line_recon_64.json`, `line_recon_64_st.json`, `rgb_recon_fp.json` predate the fair head;
+keep for history, prefer `line_recon_64_fair*.json` when citing patch Dice.
 
 Spectrum figures in `present/figs/11_*.png` illustrate **patch mean**, not the
 learned Conv2d stem used by `PatchNet`.
-
-Regenerate other metrics with `scripts/train_benchmark.py` / `scripts/line_recon.py`.
-Other raw logs under `results/` (if present locally) are gitignored.

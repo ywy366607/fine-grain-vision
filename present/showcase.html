@@ -335,17 +335,17 @@
   <div class="metric">
     <div class="k">slice · RGB 红线 Dice</div>
     <div class="v good mono">1.00</div>
-    <div class="s">FP ≈ 0 · 400 step · res 64</div>
+    <div class="s">公平协议 · ≈step 100 · res 64</div>
   </div>
   <div class="metric">
-    <div class="k">patch16 · 同任务 Dice</div>
-    <div class="v bad mono">0.15†</div>
-    <div class="s">†旧版 bilinear 头 · 见下方勘误</div>
+    <div class="k">patch16 · 公平 unpatchify</div>
+    <div class="v bad mono">0.22</div>
+    <div class="s">旧 bilinear ≈0.15 · 仍远低于 slice</div>
   </div>
   <div class="metric">
     <div class="k">瓶颈判断</div>
     <div class="v" style="font-size:1.15rem;color:var(--amber)">s/p 容量</div>
-    <div class="s">编码 + 寻址，非「必然抹死」</div>
+    <div class="s">换公平头仍站得住</div>
   </div>
 </div>
 
@@ -466,16 +466,13 @@
     res 64 · batch 32 · 400 step · hard≈35% 装入 16×16 · BCE+Dice。
   </p>
 
-  <div class="callout amber">
-    <div class="t">勘误：重建头公平性</div>
+  <div class="callout blue">
+    <div class="t">公平解码器已复跑</div>
     <p>
-      下表 patch16 数字来自<strong>旧解码器</strong>：
-      <code>tokens → bilinear upsample → 1×1 conv</code>。
-      该头<strong>无法</strong>在 16×16 格内预测独立相对位置，即使 token 保留了线在块内的信息，
-      也只能吐出平滑色块。因此 ~0.15 Dice <strong>同时</strong>混入「编码损失」与「头展不开」。
-      公平对照至少应：
-      <code>token → Linear(dim, 16×16) → unpatchify</code>
-      （或 PixelShuffle / ConvTranspose）。仓库默认已改为 unpatchify；旧数请标 †。
+      旧 head <code>bilinear → 1×1</code> 会低估 patch（无法展开块内结构）。
+      现默认 <code>token → Linear(dim, p²) → unpatchify</code>，已重训：
+      patch16 Dice <strong>0.15 → 0.22</strong>，slice 仍为 <strong>1.00</strong>。
+      <strong>差距缩小一点，但主结论不变。</strong>
     </p>
   </div>
 
@@ -484,58 +481,60 @@
       <thead>
         <tr>
           <th>方法</th>
-          <th>结构</th>
+          <th>结构 / 头</th>
           <th>Dice ↑</th>
           <th>IoU</th>
-          <th>FP / 图</th>
           <th>Recall</th>
         </tr>
       </thead>
       <tbody>
         <tr>
           <td><strong>slice + local + mass</strong></td>
-          <td class="muted">32 槽 + 点流 · ST 防塌</td>
+          <td class="muted">点流 Linear · 公平</td>
           <td class="ok mono">1.000</td>
           <td class="ok mono">1.000</td>
-          <td class="ok mono">0</td>
           <td class="ok mono">1.000</td>
         </tr>
         <tr>
-          <td>patch16†（ViT 网格）</td>
-          <td class="muted">16 token · <em>bilinear 头</em></td>
-          <td class="no mono">0.153†</td>
-          <td class="no mono">0.085†</td>
-          <td class="no mono">~375†</td>
-          <td class="mid mono">0.685†</td>
+          <td>patch16（公平）</td>
+          <td class="muted">unpatchify Linear→p²</td>
+          <td class="no mono">0.215</td>
+          <td class="no mono">0.121</td>
+          <td class="mid mono">0.880</td>
+        </tr>
+        <tr>
+          <td>patch16（旧）</td>
+          <td class="muted">bilinear + 1×1</td>
+          <td class="muted mono">~0.15</td>
+          <td class="muted mono">~0.09</td>
+          <td class="muted mono">~0.69</td>
         </tr>
       </tbody>
     </table>
   </div>
-  <p class="faint">† 旧版不公平解码器；请用仓库 <code>--patch-decoder unpatchify</code> 重跑后再报绝对 Dice。</p>
+  <p class="faint">协议：RGB 纯红 1px · res 64 · 600 step · hard≈35% · 见 <code>results/published/line_recon_64_fair.json</code></p>
 
   <div class="fig">
     <img src="figs/13_line_recon_dice.png" alt="Dice 对比" />
     <div class="cap">
-      <b>图 7</b> · 同为红色折线：slice 干净满分；patch16†（bilinear 头）糊且假阳性高。
-      差距<strong>不能</strong>全部归因于「网格编码」——旧头也在拖后腿。
+      <b>图 7</b> · 早期图可能仍对应 bilinear 头；以表格中的<strong>公平重跑数字</strong>为准。
     </div>
   </div>
 
   <div class="fig">
     <img src="figs/12_line_recon_gallery.png" alt="红线重建拼图" />
     <div class="cap">
-      <b>图 8</b> · 从左到右：RGB 输入 · 真值 · <b>slice</b> · <b>patch16†</b>。
-      人眼可见的红线，slice 描得干净；右侧 patch 结果请按上勘误阅读。
+      <b>图 8</b> · 从左到右：RGB 输入 · 真值 · <b>slice</b> · <b>patch16</b>（示意图）。
+      定量结论以公平 unpatchify 重跑为准：slice 满分，patch ≈0.22。
     </div>
   </div>
 
   <div class="callout green">
     <div class="t">如何读这个结果</div>
     <p>
-      主叙事仍是<strong>细粒度通道</strong>：全点可达 + mass，让 1px 结构有机会被编码。
-      但与 patch 的 recon 对比必须<strong>对齐解码器容量</strong>。
-      <strong>Stiefel / Newton–Schulz</strong> 只用于<strong>抑制槽方向坍缩</strong>，
-      不是本页与 patch 的主对比轴。合成任务、小模型——定方向，不报 SOTA。
+      对齐解码器后，patch 略升、slice 仍近满分 → 主叙事仍是<strong>细粒度通道</strong>
+      （全点可达 + mass），不是「只靠一个不公平的 head 赢了」。
+      <strong>Stiefel</strong> 只防槽方向坍缩，不是与 patch 的主对比轴。
     </p>
   </div>
 </section>
@@ -610,7 +609,7 @@
       </thead>
       <tbody>
         <tr><td>极小色块 / 1px 点</td><td class="no">随 s/p 掉</td><td class="ok">好</td></tr>
-        <tr><td>1px 纯红折线 (RGB)</td><td class="no">patch16 ≈ 0.15† bilinear 头</td><td class="ok">slice ≈ 1.00 · FP≈0</td></tr>
+        <tr><td>1px 纯红折线 (RGB)</td><td class="no">patch16 ≈ 0.22（公平头）</td><td class="ok">slice ≈ 1.00</td></tr>
         <tr><td>字形结构（有局部时）</td><td class="mid">可以</td><td class="ok">完整栈更高</td></tr>
         <tr><td>视觉 token 预算</td><td class="muted">网格常更多</td><td class="ok">可压到很少（如 32）</td></tr>
       </tbody>
@@ -627,7 +626,7 @@
   </div>
   <ol>
     <li>固定 patch 网格下，局部细结构的<strong>容量与 SNR 随 s/p 变差</strong>（学习卷积 ≠ 强制均值低通）。</li>
-    <li><strong>全点 + mass</strong> 提供细粒度<strong>通道</strong>；recon 对比须用<strong>可 unpatchify 的头</strong>，否则低估 patch。</li>
+    <li><strong>全点 + mass</strong> 提供细粒度<strong>通道</strong>；公平 unpatchify 头下 slice 仍 1.00、patch16≈0.22。</li>
     <li><strong>Stiefel</strong> 用于<strong>防槽方向坍缩</strong>；编码完备性先于夹角 / 真字符 / 场景推理。</li>
   </ol>
   <div class="callout amber">

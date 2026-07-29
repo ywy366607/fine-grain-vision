@@ -1,0 +1,45 @@
+{
+  "task": "line_recon_rgb_fair",
+  "res": 64,
+  "batch": 32,
+  "steps": 600,
+  "hard_frac": 0.35,
+  "rgb": true,
+  "patch_decoder": "unpatchify",
+  "note": "Fair patch head: token -> Linear(dim, p*p) -> unpatchify. Slice stopped early once Dice=1.0 at step 100; patch16 full 600 steps.",
+  "arms": [
+    {
+      "arm": "slice_loc_nogumbel",
+      "n_par": 98915,
+      "decoder": "point",
+      "final": {
+        "step": 100,
+        "dice": 1.0,
+        "iou": 1.0,
+        "recall": 1.0,
+        "trivial_dice": 1.0
+      },
+      "history_probe": [
+        {"step": 0, "dice": 0.086, "iou": 0.045, "recall": 0.677},
+        {"step": 100, "dice": 1.0, "iou": 1.0, "recall": 1.0},
+        {"step": 200, "dice": 1.0, "iou": 1.0, "recall": 1.0},
+        {"step": 300, "dice": 1.0, "iou": 1.0, "recall": 1.0}
+      ]
+    },
+    {
+      "arm": "patch16",
+      "n_par": 176638,
+      "decoder": "unpatchify",
+      "final": {
+        "step": 600,
+        "dice": 0.215,
+        "iou": 0.121,
+        "recall": 0.880,
+        "trivial_dice": 1.0
+      },
+      "source": "line_recon_64_fair_patch16.json"
+    }
+  ],
+  "legacy_bilinear_patch16_dice": 0.153,
+  "conclusion": "Fair unpatchify head lifts patch16 Dice ~0.15 -> ~0.22 but still far below slice 1.00. Gap is not only an unfair decoder."
+}

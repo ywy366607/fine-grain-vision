@@ -27,8 +27,8 @@ This repo measures both sides under a matched token budget:
 | **P6** | Thin **lines** survive patch grids; **point-like** needles do not — fine ≠ small. |
 | **P7** | **Mass normalization** is the size-invariance mechanism (not per-pixel tokens alone). |
 | **Oracle** | Glyph memorization failure is largely **optimization** (Gumbel noise), not expressivity. |
-| **Line recon** | On pure-red RGB polylines, slice (+ optional Stiefel) reconstructs near-perfect masks under a dense head. Early **patch16 ~0.15 Dice** used a **bilinear upsample + 1×1** head — that number confounds encoder and decoder; see caveats. Stiefel is mainly **anti-collapse**, not recon magic. |
-| **Caveats** | (1) Prefer **RGB** over luma (luma≈0.299 shortcut on red lines). (2) Fair patch recon needs a head that can emit **within-patch** structure: default is now `token → Linear(dim, p²) → unpatchify` (or PixelShuffle); `--patch-decoder bilinear` is the legacy unfair head. (3) Spectrum wipe figure uses **patch mean** as an illustration — real `PatchNet` stem is **learned** `Conv2d(k=p,s=p)`, not mean low-pass; say **capacity/SNR of local high-freq structure falls with s/p**, not “inevitably wipes 1px lines.” |
+| **Line recon (fair)** | RGB pure-red 1px polylines, res 64, 600 steps. **slice** Dice **1.00** by ~step 100. **patch16** with fair head `Linear→unpatchify`: Dice **0.215** (IoU 0.12, recall 0.88). Legacy bilinear head was **~0.15** — fair head helps a little, **does not close the gap**. Stiefel is mainly **anti-collapse**, not recon magic. See [`results/published/line_recon_64_fair.json`](results/published/line_recon_64_fair.json). |
+| **Caveats** | (1) Prefer **RGB** over luma (luma≈0.299 shortcut on red lines). (2) Default patch recon head is unpatchify; `--patch-decoder bilinear` is legacy only. (3) Spectrum wipe figure uses **patch mean** as illustration — real stem is learned `Conv2d(k=p,s=p)`; claim is **capacity/SNR falls with s/p**, not “inevitably wipes 1px lines.” |
 
 Published JSON snapshots live in [`results/published/`](results/published/).
 
