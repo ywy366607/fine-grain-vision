@@ -29,6 +29,15 @@ Recurrence (fallback only)
 Shared-weight multi-pass mix (Universal Transformer / iterative refinement)
 is **not** the primary scatter fix. Enable ``Block.recur_T > 1`` only after
 sparse write is measured; default T=1 (single pass).
+
+Slice count vs ambient dim (collapse geometry)
+----------------------------------------------
+Slice / query directions live in ``R^C`` with ``C = heads * dim_head`` (or full
+``dim``). At most ``C`` linearly independent axes exist. If ``slice_num G > C``,
+high ``cos_tok`` / dead slots are **forced by rank**, not only by soft assignment
+or Gumbel. Prefer ``G <= C`` (this package defaults ``G=32``, ``C=64``), or raise
+``dim`` / head width. Newton–Schulz Stiefel on ``[B,C,G]`` is likewise ill-posed
+as a full orthonormal frame when ``G > C``.
 """
 from __future__ import annotations
 
@@ -443,12 +452,17 @@ ARMS = {
                                      nog=True, deslice_topk=2),
     "slice_loc_nogumbel_st_topk2": dict(kind="slice", norm="mass", mult=1, local=True,
                                         nog=True, stiefel_ns=True, deslice_topk=2),
+    # ST + top-k write + residual-branch gate only (no Qwen post-attn gate)
+    "slice_loc_nogumbel_st_topk2_resgate": dict(
+        kind="slice", norm="mass", mult=1, local=True, nog=True,
+        stiefel_ns=True, deslice_topk=2, res_gate=True),
     # Residual-branch write gate (extra; not Qwen paper primary recipe)
     "slice_loc_nogumbel_gate": dict(kind="slice", norm="mass", mult=1, local=True,
                                     nog=True, res_gate=True),
     # Qwen paper (arXiv:2505.06708): post-attn residual-dependent head gate only
     "slice_loc_nogumbel_qwen": dict(kind="slice", norm="mass", mult=1, local=True,
                                     nog=True, qwen_sdpa_gate=True),
+    # Full stack: ST + topk2 + res_gate + Qwen post-attn (heavy; optional)
     "slice_loc_nogumbel_st_topk2_gate": dict(
         kind="slice", norm="mass", mult=1, local=True, nog=True,
         stiefel_ns=True, deslice_topk=2, res_gate=True, qwen_sdpa_gate=True),
