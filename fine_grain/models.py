@@ -17,10 +17,12 @@ Qwen gated attention (secondary, correct placement)
 Qiu et al., arXiv:2505.06708 (NeurIPS 2025 Best Paper; used in Qwen3-Next):
 head-specific ``O ← σ(W x) ⊙ SDPA(Q,K,V)`` — gate is **after** SDPA, not on
 QK softmax and not only on the task head. Mapped here as:
-  (1) ``AdaTempSlice.qwen_sdpa_gate``: σ-gate multiplies **slice-token** SDPA
-      output before deslice (query-side features = mass-normed tokens);
+  (1) ``AdaTempSlice.qwen_sdpa_gate`` (paper form, arXiv:2505.06708): after
+      deslice, head-specific ``O ← σ(W · X) ⊙ AttnOut`` where X is the
+      residual-stream projection at each point (``xm``), matching Qwen's
+      query/residual-dependent gate after SDPA and before out-proj;
   (2) ``Block.use_res_gate``: residual-stream form ``x + σ(W x_pre) ⊙ mix_out``
-      (gate multiplies the branch entering residual add).
+      (extra write control; not the paper's primary recipe).
 
 Recurrence (fallback only)
 --------------------------
@@ -155,9 +157,9 @@ class AdaTempSlice(nn.Module):
         # sparse WRITE path (pool/read still uses soft w)
         self.deslice_topk = 0          # 0 = full soft scatter
         self.deslice_threshold = 0.0   # 0 = no threshold
-        # Qwen gated attention: head-specific gate after SDPA (default off)
+        # Qwen gated attention (paper): head-specific σ after AttnOut (default off)
         self.qwen_sdpa_gate = False
-        # gate from residual-stream point features after in_project: [B,N,inner] -> [B,H,N,1]
+        # residual-stream head features xm [B,H,N,Dh] -> gate [B,H,N,1]
         self.sdpa_gate_proj = nn.Linear(dim_head, 1)
 
     def forward(self, x):                                      # x: [B,N,C]
@@ -208,17 +210,6 @@ class AdaTempSlice(nn.Module):
             self.last_mass = mass.detach()
 
         att = F.scaled_dot_product_attention(self.to_q(tok), self.to_k(tok), self.to_v(tok))
-        # Qwen gated attention (arXiv:2505.06708): head-specific σ-gate *after* SDPA
-        # on the attention *output* (slice tokens), not on QK softmax.
-        # Query-side features = mass-normalized slice tokens `tok` [B,H,G,Dh]
-        # (Transolver's "query positions" are the G slices). Form:
-        #   G = σ(tok W_θ) ∈ (0,1)^{B,H,G,1};  att ← G ⊙ att
-        if getattr(self, "qwen_sdpa_gate", False):
-            g_tok = torch.sigmoid(self.sdpa_gate_proj(tok))        # [B,H,G,1]
-            att = att * g_tok
-            self.last_sdpa_gate = g_tok.detach()
-        else:
-            self.last_sdpa_gate = None
 
         # --- WRITE / deslice: optional sparse scatter (PRIMARY soft-scatter fix) ---
         # Soft pool/read above is unchanged; only the write path may sparsify.
@@ -227,7 +218,22 @@ class AdaTempSlice(nn.Module):
             topk=getattr(self, "deslice_topk", 0),
             threshold=getattr(self, "deslice_threshold", 0.0),
         )
-        out = torch.einsum("bhgc,bhng->bhnc", att, w_write)        # deslice
+        out = torch.einsum("bhgc,bhng->bhnc", att, w_write)        # [B,H,N,Dh]
+
+        # Qwen gated attention — paper form (Qiu et al., arXiv:2505.06708):
+        #   O = σ(X W_θ) ⊙ AttnOut
+        # Standard TF: AttnOut is at residual/query positions N, then out-proj.
+        # Transolver SDPA is on G slices; after deslice, AttnOut lives at N points
+        # (same sites as residual stream). Gate is residual-dependent and
+        # head-specific from xm = Linear(residual), *not* on QK softmax, *not*
+        # the task head. This is the paper recipe; Block.res_gate is separate.
+        if getattr(self, "qwen_sdpa_gate", False):
+            g = torch.sigmoid(self.sdpa_gate_proj(xm))             # [B,H,N,1]
+            out = out * g
+            self.last_sdpa_gate = g.detach()
+        else:
+            self.last_sdpa_gate = None
+
         out = out.permute(0, 2, 1, 3).reshape(B, N, self.h * self.dh)
 
         # probes
@@ -437,9 +443,12 @@ ARMS = {
                                      nog=True, deslice_topk=2),
     "slice_loc_nogumbel_st_topk2": dict(kind="slice", norm="mass", mult=1, local=True,
                                         nog=True, stiefel_ns=True, deslice_topk=2),
-    # Qwen-style residual-stream post-mix gate (+ optional sparse write)
+    # Residual-branch write gate (extra; not Qwen paper primary recipe)
     "slice_loc_nogumbel_gate": dict(kind="slice", norm="mass", mult=1, local=True,
                                     nog=True, res_gate=True),
+    # Qwen paper (arXiv:2505.06708): post-attn residual-dependent head gate only
+    "slice_loc_nogumbel_qwen": dict(kind="slice", norm="mass", mult=1, local=True,
+                                    nog=True, qwen_sdpa_gate=True),
     "slice_loc_nogumbel_st_topk2_gate": dict(
         kind="slice", norm="mass", mult=1, local=True, nog=True,
         stiefel_ns=True, deslice_topk=2, res_gate=True, qwen_sdpa_gate=True),

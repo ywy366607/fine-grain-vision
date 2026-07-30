@@ -105,7 +105,7 @@ def test_block_res_gate_form():
 
 
 def test_qwen_sdpa_gate_multiplies_att_not_qk():
-    """SDPA output gate (arXiv:2505.06708) is after attention on slice tokens."""
+    """Paper form: O = σ(X_res W) ⊙ AttnOut at residual positions (arXiv:2505.06708)."""
     torch.manual_seed(4)
     mix = D.AdaTempSlice(64, heads=4, dim_head=16, slice_num=8, norm="mass")
     mix.no_gumbel = True
@@ -115,14 +115,14 @@ def test_qwen_sdpa_gate_multiplies_att_not_qk():
     with torch.no_grad():
         mix.to_out.bias.zero_()  # isolate gate effect from output bias
         mix.sdpa_gate_proj.weight.zero_()
-        mix.sdpa_gate_proj.bias.fill_(-20.0)  # σ(-20)≈0 → att killed
+        mix.sdpa_gate_proj.bias.fill_(-20.0)  # σ(-20)≈0 → branch killed
         out0, _ = mix(x)
         mix.sdpa_gate_proj.bias.fill_(20.0)   # σ(20)≈1
         out1, _ = mix(x)
     assert out0.abs().mean() < 1e-4, float(out0.abs().mean())
     assert out1.abs().mean() > out0.abs().mean() + 1e-3
     g = mix.last_sdpa_gate
-    assert g is not None and g.shape[-1] == 1
+    assert g is not None and g.shape == (2, 4, 16, 1)  # [B,H,N,1] residual sites
 
 
 def test_apply_flags_baseline_unchanged_defaults():
@@ -140,6 +140,14 @@ def test_build_topk_arm():
         assert b.mix.deslice_topk == 2
         assert b.mix.stiefel_ns is True
         assert b.mix.no_gumbel is True
+
+
+def test_build_qwen_paper_arm():
+    m = D.build(D.ARMS["slice_loc_nogumbel_qwen"], 64, 2, 32, 6)
+    for b in m.blocks:
+        assert b.mix.qwen_sdpa_gate is True
+        assert b.mix.deslice_topk == 0
+        assert not b.use_res_gate
 
 
 def test_recur_T_shared_weights_active():
@@ -179,6 +187,8 @@ if __name__ == "__main__":
     print("ok baseline flags")
     test_build_topk_arm()
     print("ok topk arm")
+    test_build_qwen_paper_arm()
+    print("ok qwen paper arm")
     test_recur_T_shared_weights_active()
     print("ok recur fallback")
     print("ALL UNIT TESTS PASSED")
