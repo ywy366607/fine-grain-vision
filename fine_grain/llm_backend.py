@@ -155,11 +155,29 @@ def _load_from_path(local: str, device: str, dtype: Any) -> Tuple[Any, Any, int,
 
 
 def _local_manual_dirs() -> List[Path]:
-    """Paths filled by hf-mirror curl into D:\\ml_cache\\huggingface\\models\\*."""
+    """Local model dirs on D: (curl copies + HF hub snapshots)."""
+    found: List[Path] = []
     root = _D_CACHE / "huggingface" / "models"
-    if not root.is_dir():
-        return []
-    return [p for p in root.iterdir() if p.is_dir() and (p / "config.json").is_file()]
+    if root.is_dir():
+        found.extend(
+            p for p in root.iterdir() if p.is_dir() and (p / "config.json").is_file()
+        )
+    # HF hub cache layout: hub/models--org--name/snapshots/<hash>/
+    hub = _D_CACHE / "huggingface" / "hub"
+    if hub.is_dir():
+        for repo in hub.glob("models--*"):
+            snaps = repo / "snapshots"
+            if not snaps.is_dir():
+                continue
+            # newest snapshot
+            candidates = sorted(
+                [s for s in snaps.iterdir() if s.is_dir() and (s / "config.json").is_file()],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if candidates:
+                found.append(candidates[0])
+    return found
 
 
 def load_frozen_lm(
@@ -170,14 +188,18 @@ def load_frozen_lm(
     """Return (model, tokenizer, d_llm, backend_note). LLM frozen. Cache on D:."""
     import torch
 
+    # Gemma-3-270M NaNs under fp16 on some consumer GPUs; default fp32 when prefer=gemma
+    # (270M weights ~1GB — still fits 4GB). Others may use fp16.
     if dtype is None:
-        dtype = torch.float16 if str(device).startswith("cuda") else torch.float32
+        if prefer == "gemma":
+            dtype = torch.float32
+        else:
+            dtype = torch.float16 if str(device).startswith("cuda") else torch.float32
 
     errors: List[str] = []
 
-    # 1) Manual hf-mirror downloads already on D:
+    # 1) Local downloads on D: (curl / HF hub snapshots)
     manuals = _local_manual_dirs()
-    # Prefer name match
     order = []
     if prefer == "gemma":
         order = ["gemma-3-270m", "gemma", "pythia-160m", "pythia-70m"]
@@ -199,8 +221,12 @@ def load_frozen_lm(
         try:
             if not str(p).upper().startswith("D:"):
                 raise RuntimeError(f"refusing non-D path {p}")
-            model, tok, d_llm, path = _load_from_path(str(p), device, dtype)
-            note = f"hf-mirror-local path={path} d_llm={d_llm} cache={_D_CACHE}"
+            # force fp32 for gemma* paths even if prefer was generic
+            use_dtype = torch.float32 if "gemma" in p.name.lower() else dtype
+            model, tok, d_llm, path = _load_from_path(str(p), device, use_dtype)
+            note = (
+                f"local-D path={path} d_llm={d_llm} dtype={use_dtype} cache={_D_CACHE}"
+            )
             return model, tok, d_llm, note
         except Exception as e:
             errors.append(f"manual:{p.name}: {type(e).__name__}: {e}")

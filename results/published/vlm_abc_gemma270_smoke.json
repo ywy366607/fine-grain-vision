@@ -1,0 +1,429 @@
+{
+  "backend": "local-D path=D:\\ml_cache\\huggingface\\models\\google--gemma-3-270m d_llm=640 dtype=torch.float32 cache=D:\\ml_cache",
+  "cache_root": "D:\\ml_cache",
+  "res": 32,
+  "patch": 4,
+  "steps": 15,
+  "batch": 2,
+  "topk": 2,
+  "T_list": [
+    64,
+    32
+  ],
+  "table": [
+    {
+      "kind": "A",
+      "T": 64,
+      "final_loss": 4.329070568084717,
+      "probe_token_acc": 0.40725806451612906,
+      "slot_last": {},
+      "budget": null,
+      "seconds": 4.375735521316528,
+      "status": "ok"
+    },
+    {
+      "kind": "B",
+      "T": 64,
+      "final_loss": 5.680432319641113,
+      "probe_token_acc": 0.012096774193548387,
+      "slot_last": {
+        "PR_mass": 49.30562973022461,
+        "r99": 62.75,
+        "support": 2.0
+      },
+      "budget": null,
+      "seconds": 5.944424390792847,
+      "status": "ok"
+    },
+    {
+      "kind": "C",
+      "T": 48,
+      "final_loss": 6.185296535491943,
+      "probe_token_acc": 0.08870967741935484,
+      "slot_last": {
+        "PR_mass": 20.520099639892578,
+        "r99": 31.25,
+        "support": 2.0
+      },
+      "budget": "16+32",
+      "seconds": 4.562658309936523,
+      "status": "ok"
+    },
+    {
+      "kind": "A",
+      "T": 32,
+      "final_loss": 4.488249778747559,
+      "probe_token_acc": 0.4435483870967742,
+      "slot_last": {},
+      "budget": null,
+      "seconds": 3.754345417022705,
+      "status": "ok"
+    },
+    {
+      "kind": "B",
+      "T": 32,
+      "final_loss": 6.361866474151611,
+      "probe_token_acc": 0.05241935483870968,
+      "slot_last": {
+        "PR_mass": 16.441883087158203,
+        "r99": 30.25,
+        "support": 2.0
+      },
+      "budget": null,
+      "seconds": 4.132166624069214,
+      "status": "ok"
+    },
+    {
+      "kind": "C",
+      "T": 32,
+      "final_loss": 6.805408000946045,
+      "probe_token_acc": 0.08870967741935484,
+      "slot_last": {
+        "PR_mass": 11.432640075683594,
+        "r99": 15.75,
+        "support": 2.0
+      },
+      "budget": "16+16",
+      "seconds": 4.3473896980285645,
+      "status": "ok"
+    }
+  ],
+  "rows": [
+    {
+      "kind": "A",
+      "T": 64,
+      "final_loss": 4.329070568084717,
+      "probe_token_acc": 0.40725806451612906,
+      "history": [
+        {
+          "step": 1,
+          "loss": 6.509241104125977,
+          "T": 64,
+          "kind": "A",
+          "seconds": 0.5934572219848633
+        },
+        {
+          "step": 10,
+          "loss": 4.645966053009033,
+          "T": 64,
+          "kind": "A",
+          "seconds": 2.2385802268981934
+        },
+        {
+          "step": 15,
+          "loss": 4.329070568084717,
+          "T": 64,
+          "kind": "A",
+          "seconds": 3.0755436420440674
+        }
+      ],
+      "slot_last": {},
+      "meta_example": {
+        "kind": "A",
+        "native_T": 64,
+        "patch": 4,
+        "res": 32,
+        "T": 64
+      },
+      "seconds": 4.375735521316528
+    },
+    {
+      "kind": "B",
+      "T": 64,
+      "final_loss": 5.680432319641113,
+      "probe_token_acc": 0.012096774193548387,
+      "history": [
+        {
+          "step": 1,
+          "loss": 6.9520792961120605,
+          "T": 64,
+          "kind": "B",
+          "seconds": 0.7043745517730713,
+          "slot": {
+            "PR_mass": 48.868560791015625,
+            "r99": 62.5,
+            "support": 2.0
+          }
+        },
+        {
+          "step": 10,
+          "loss": 5.397775173187256,
+          "T": 64,
+          "kind": "B",
+          "seconds": 2.706014394760132,
+          "slot": {
+            "PR_mass": 49.30664825439453,
+            "r99": 62.75,
+            "support": 2.0
+          }
+        },
+        {
+          "step": 15,
+          "loss": 5.680432319641113,
+          "T": 64,
+          "kind": "B",
+          "seconds": 3.955371856689453,
+          "slot": {
+            "PR_mass": 49.30562973022461,
+            "r99": 62.75,
+            "support": 2.0
+          }
+        }
+      ],
+      "slot_last": {
+        "PR_mass": 49.30562973022461,
+        "r99": 62.75,
+        "support": 2.0
+      },
+      "meta_example": {
+        "kind": "B",
+        "T": 64,
+        "C": 64,
+        "G_le_C": true,
+        "deslice_topk": 2,
+        "stiefel_ns": true,
+        "slot": {
+          "PR_mass": 49.30562973022461,
+          "r99": 62.75,
+          "support": 2.0
+        },
+        "res": 32
+      },
+      "seconds": 5.944424390792847
+    },
+    {
+      "kind": "C",
+      "T": 48,
+      "final_loss": 6.185296535491943,
+      "probe_token_acc": 0.08870967741935484,
+      "history": [
+        {
+          "step": 1,
+          "loss": 6.093268394470215,
+          "T": 48,
+          "kind": "C",
+          "seconds": 0.23305940628051758,
+          "slot": {
+            "PR_mass": 21.29195785522461,
+            "r99": 31.25,
+            "support": 2.0
+          },
+          "budget": "16+32"
+        },
+        {
+          "step": 10,
+          "loss": 6.058821678161621,
+          "T": 48,
+          "kind": "C",
+          "seconds": 1.9978187084197998,
+          "slot": {
+            "PR_mass": 20.900611877441406,
+            "r99": 31.25,
+            "support": 2.0
+          },
+          "budget": "16+32"
+        },
+        {
+          "step": 15,
+          "loss": 6.185296535491943,
+          "T": 48,
+          "kind": "C",
+          "seconds": 2.9696879386901855,
+          "slot": {
+            "PR_mass": 20.520099639892578,
+            "r99": 31.25,
+            "support": 2.0
+          },
+          "budget": "16+32"
+        }
+      ],
+      "slot_last": {
+        "PR_mass": 20.520099639892578,
+        "r99": 31.25,
+        "support": 2.0
+      },
+      "meta_example": {
+        "kind": "C",
+        "T": 48,
+        "T_patch": 16,
+        "T_slice": 32,
+        "budget": "16+32",
+        "slice_slot": {
+          "PR_mass": 20.520099639892578,
+          "r99": 31.25,
+          "support": 2.0
+        },
+        "res": 32
+      },
+      "seconds": 4.562658309936523
+    },
+    {
+      "kind": "A",
+      "T": 32,
+      "final_loss": 4.488249778747559,
+      "probe_token_acc": 0.4435483870967742,
+      "history": [
+        {
+          "step": 1,
+          "loss": 6.404152870178223,
+          "T": 32,
+          "kind": "A",
+          "seconds": 0.15807867050170898
+        },
+        {
+          "step": 10,
+          "loss": 4.341932773590088,
+          "T": 32,
+          "kind": "A",
+          "seconds": 1.5782749652862549
+        },
+        {
+          "step": 15,
+          "loss": 4.488249778747559,
+          "T": 32,
+          "kind": "A",
+          "seconds": 2.39262318611145
+        }
+      ],
+      "slot_last": {},
+      "meta_example": {
+        "kind": "A",
+        "native_T": 64,
+        "patch": 4,
+        "res": 32,
+        "T": 32
+      },
+      "seconds": 3.754345417022705
+    },
+    {
+      "kind": "B",
+      "T": 32,
+      "final_loss": 6.361866474151611,
+      "probe_token_acc": 0.05241935483870968,
+      "history": [
+        {
+          "step": 1,
+          "loss": 5.897938251495361,
+          "T": 32,
+          "kind": "B",
+          "seconds": 0.19519758224487305,
+          "slot": {
+            "PR_mass": 17.206771850585938,
+            "r99": 30.25,
+            "support": 2.0
+          }
+        },
+        {
+          "step": 10,
+          "loss": 5.482954978942871,
+          "T": 32,
+          "kind": "B",
+          "seconds": 1.7520220279693604,
+          "slot": {
+            "PR_mass": 16.55987548828125,
+            "r99": 30.25,
+            "support": 2.0
+          }
+        },
+        {
+          "step": 15,
+          "loss": 6.361866474151611,
+          "T": 32,
+          "kind": "B",
+          "seconds": 2.6470861434936523,
+          "slot": {
+            "PR_mass": 16.441883087158203,
+            "r99": 30.25,
+            "support": 2.0
+          }
+        }
+      ],
+      "slot_last": {
+        "PR_mass": 16.441883087158203,
+        "r99": 30.25,
+        "support": 2.0
+      },
+      "meta_example": {
+        "kind": "B",
+        "T": 32,
+        "C": 64,
+        "G_le_C": true,
+        "deslice_topk": 2,
+        "stiefel_ns": true,
+        "slot": {
+          "PR_mass": 16.441883087158203,
+          "r99": 30.25,
+          "support": 2.0
+        },
+        "res": 32
+      },
+      "seconds": 4.132166624069214
+    },
+    {
+      "kind": "C",
+      "T": 32,
+      "final_loss": 6.805408000946045,
+      "probe_token_acc": 0.08870967741935484,
+      "history": [
+        {
+          "step": 1,
+          "loss": 5.775111198425293,
+          "T": 32,
+          "kind": "C",
+          "seconds": 0.20719146728515625,
+          "slot": {
+            "PR_mass": 11.72994327545166,
+            "r99": 15.5,
+            "support": 2.0
+          },
+          "budget": "16+16"
+        },
+        {
+          "step": 10,
+          "loss": 6.422237873077393,
+          "T": 32,
+          "kind": "C",
+          "seconds": 1.8277997970581055,
+          "slot": {
+            "PR_mass": 11.590417861938477,
+            "r99": 15.5,
+            "support": 2.0
+          },
+          "budget": "16+16"
+        },
+        {
+          "step": 15,
+          "loss": 6.805408000946045,
+          "T": 32,
+          "kind": "C",
+          "seconds": 2.7262063026428223,
+          "slot": {
+            "PR_mass": 11.432640075683594,
+            "r99": 15.75,
+            "support": 2.0
+          },
+          "budget": "16+16"
+        }
+      ],
+      "slot_last": {
+        "PR_mass": 11.432640075683594,
+        "r99": 15.75,
+        "support": 2.0
+      },
+      "meta_example": {
+        "kind": "C",
+        "T": 32,
+        "T_patch": 16,
+        "T_slice": 16,
+        "budget": "16+16",
+        "slice_slot": {
+          "PR_mass": 11.432640075683594,
+          "r99": 15.75,
+          "support": 2.0
+        },
+        "res": 32
+      },
+      "seconds": 4.3473896980285645
+    }
+  ]
+}
