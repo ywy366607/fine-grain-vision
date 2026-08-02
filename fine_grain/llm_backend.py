@@ -154,6 +154,14 @@ def _load_from_path(local: str, device: str, dtype: Any) -> Tuple[Any, Any, int,
     return model, tok, d_llm, local
 
 
+def _local_manual_dirs() -> List[Path]:
+    """Paths filled by hf-mirror curl into D:\\ml_cache\\huggingface\\models\\*."""
+    root = _D_CACHE / "huggingface" / "models"
+    if not root.is_dir():
+        return []
+    return [p for p in root.iterdir() if p.is_dir() and (p / "config.json").is_file()]
+
+
 def load_frozen_lm(
     prefer: str = "gemma",
     device: str = "cuda",
@@ -165,25 +173,50 @@ def load_frozen_lm(
     if dtype is None:
         dtype = torch.float16 if str(device).startswith("cuda") else torch.float32
 
+    errors: List[str] = []
+
+    # 1) Manual hf-mirror downloads already on D:
+    manuals = _local_manual_dirs()
+    # Prefer name match
+    order = []
     if prefer == "gemma":
-        candidates = [
-            "Qwen/Qwen2.5-0.5B",
-            "google/gemma-3-270m",
-            "gpt2",
-            "EleutherAI/pythia-160m",
-        ]
+        order = ["gemma-3-270m", "gemma", "pythia-160m", "pythia-70m"]
     elif prefer == "pythia":
-        candidates = ["gpt2", "EleutherAI/pythia-160m", "Qwen/Qwen2.5-0.5B"]
+        order = ["pythia-160m", "pythia-70m", "gemma"]
+    elif prefer == "local":
+        order = []
+    else:
+        order = [prefer, "pythia-160m", "gemma"]
+    ranked: List[Path] = []
+    for key in order:
+        for p in manuals:
+            if key.lower() in p.name.lower() and p not in ranked:
+                ranked.append(p)
+    for p in manuals:
+        if p not in ranked:
+            ranked.append(p)
+    for p in ranked:
+        try:
+            if not str(p).upper().startswith("D:"):
+                raise RuntimeError(f"refusing non-D path {p}")
+            model, tok, d_llm, path = _load_from_path(str(p), device, dtype)
+            note = f"hf-mirror-local path={path} d_llm={d_llm} cache={_D_CACHE}"
+            return model, tok, d_llm, note
+        except Exception as e:
+            errors.append(f"manual:{p.name}: {type(e).__name__}: {e}")
+
+    # 2) ModelScope
+    if prefer == "gemma":
+        candidates = ["google/gemma-3-270m", "EleutherAI/pythia-160m", "gpt2"]
+    elif prefer == "pythia":
+        candidates = ["EleutherAI/pythia-160m", "gpt2"]
     elif prefer == "local":
         candidates = []
     else:
-        candidates = [prefer, "gpt2", "Qwen/Qwen2.5-0.5B"]
-
-    errors: List[str] = []
+        candidates = [prefer, "EleutherAI/pythia-160m"]
     for mid in candidates:
         try:
             local = snapshot_modelscope(mid)
-            # refuse C: paths
             if str(local).upper().startswith("C:"):
                 raise RuntimeError(f"refusing C: path {local}")
             model, tok, d_llm, path = _load_from_path(local, device, dtype)
@@ -191,21 +224,20 @@ def load_frozen_lm(
             return model, tok, d_llm, note
         except Exception as e:
             errors.append(f"{mid}: {type(e).__name__}: {e}")
-            continue
 
-    # Local tiny LM on D: (always works offline)
+    # 3) Offline tinylm on D:
     try:
         local = _ensure_local_tinylm()
         assert str(local).upper().startswith("D:")
         model, tok, d_llm, path = _load_from_path(local, device, dtype)
         note = (
             f"local_tinylm path={path} d_llm={d_llm} cache={_D_CACHE} "
-            f"(MS failed: {len(errors)} tries)"
+            f"(prior fails: {len(errors)})"
         )
         return model, tok, d_llm, note
     except Exception as e:
         errors.append(f"local_tinylm: {type(e).__name__}: {e}")
         raise RuntimeError(
-            "Failed to load LM on D: via ModelScope or local_tinylm:\n"
+            "Failed to load LM on D: (hf-mirror local / ModelScope / tinylm):\n"
             + "\n".join(errors)
         )
