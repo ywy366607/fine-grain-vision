@@ -245,14 +245,14 @@ class AdaTempSlice(nn.Module):
 
         out = out.permute(0, 2, 1, 3).reshape(B, N, self.h * self.dh)
 
-        # probes
+        # probes (always stash write weights; soft w also for slot metrics during train)
         self.last_temp = temp.detach()
         self.last_w_write = w_write.detach()
+        self.last_w = w.detach()
+        self.last_mass = mass.detach()
+        self.last_support = deslice_support_size(w_write).detach()
         if not self.training:
-            self.last_w = w.detach()
             self.last_tok = tok.detach()
-            self.last_mass = mass.detach()
-            self.last_support = deslice_support_size(w_write).detach()
 
         return self.to_out(out), tok.permute(0, 2, 1, 3).reshape(B, self.g, self.h * self.dh)
 

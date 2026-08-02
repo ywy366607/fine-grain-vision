@@ -42,6 +42,15 @@ from fine_grain.train_utils import (
     pr_obj,
 )
 
+from fine_grain.frontends import (
+    HybridFrontend,
+    PatchFrontend,
+    SliceFrontend,
+    build_frontend,
+    patch_token_count,
+    suggest_T_grid,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [

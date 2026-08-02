@@ -56,8 +56,17 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install transformers modelscope tokenizers
 # optional editable install
 pip install -e .
+```
+
+**Model weights / caches:** use **ModelScope on D:** (not C:, not HF if blocked):
+
+```bash
+set ML_CACHE_ROOT=D:\ml_cache
+python scripts/train_vlm_frontends.py --mode smoke --prefer local
+# or try: --prefer gemma / --prefer pythia  (ModelScope download → D:\ml_cache)
 ```
 
 GPU (CUDA) is optional but recommended for full sweeps.
@@ -82,6 +91,11 @@ python scripts/line_recon.py --arms patch16 --patch-decoder bilinear --rgb
 
 # optional: materialize kinks dataset to disk
 python scripts/build_kinks_dataset.py --out data/kinks256 --n_train 6000 --n_val 600
+
+# A/B/C vision → frozen small LLM (ModelScope/local tinylm on D:\ml_cache)
+set ML_CACHE_ROOT=D:\ml_cache
+python scripts/train_vlm_frontends.py --mode sweep --prefer local --res 32 --T_list 64 32 16 --steps 60 --amp
+# frontends: A=patch, B=slice tokens (T scalable, ST+topk2), C=patch+slice
 ```
 
 Speed micro-bench (CUDA):
