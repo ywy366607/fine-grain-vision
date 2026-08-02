@@ -88,6 +88,24 @@ def _trainable(m: nn.Module):
     return [p for p in m.parameters() if p.requires_grad]
 
 
+def align_text_token_preds(logits: torch.Tensor, T: int, ids: torch.Tensor, mask: torch.Tensor):
+    """Map causal LM logits → predictions for each text token (teacher-forced).
+
+    Sequence layout: [vis_0 .. vis_{T-1}, txt_0 .. txt_{L-1}].
+    ``logits[:, t]`` predicts the token *after* position t.
+    So text token ``ids[:, j]`` is predicted by ``logits[:, T - 1 + j]``.
+    Full slice: ``logits[:, T-1 : T+L-1]`` vs ``ids`` (length L).
+
+    Returns (pred [B,L], tgt [B,L], valid_mask [B,L]).
+    """
+    L = ids.shape[1]
+    # [B, L] — positions T-1 .. T+L-2 inclusive
+    pred = logits[:, T - 1 : T + L - 1].argmax(dim=-1)
+    assert pred.shape == ids.shape, (pred.shape, ids.shape)
+    valid = mask > 0
+    return pred, ids, valid
+
+
 @torch.no_grad()
 def probe_accuracy(bridge, tokenizer, device, res, n=64, batch=8):
     """Fine-grain probe: teacher-forced token accuracy on synthetic captions."""
@@ -106,14 +124,12 @@ def probe_accuracy(bridge, tokenizer, device, res, n=64, batch=8):
         emb = bridge.llm.get_input_embeddings()(ids)
         inputs = torch.cat([v, emb], dim=1)
         T = v.shape[1]
+        L = ids.shape[1]
         attn = torch.cat([
             torch.ones(b, T, device=device, dtype=mask.dtype), mask,
         ], dim=1)
         logits = bridge.llm(inputs_embeds=inputs, attention_mask=attn, use_cache=False).logits
-        # predict text positions from logits at visual+text[:-1]
-        pred = logits[:, T - 1 : T - 1 + ids.shape[1] - 1].argmax(-1)
-        tgt = ids[:, 1:]
-        m = mask[:, 1:] > 0
+        pred, tgt, m = align_text_token_preds(logits, T, ids, mask)
         hits += int((pred[m] == tgt[m]).sum())
         tot += int(m.sum())
         left -= b
