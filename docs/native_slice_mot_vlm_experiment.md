@@ -1,6 +1,7 @@
 # Native Slice-MoT VLM: First Realistic Integration Experiment
 
-Status: preregistered design, not yet implemented or evaluated.
+Status: core architecture implemented on `feat/native-slice-mot-vlm`; training
+and efficacy evaluation have not started.
 
 This is the first experiment in this repository that moves beyond synthetic
 classification and reconstruction into a jointly trained vision-language model.
@@ -68,7 +69,7 @@ Each input pixel owns one state vector:
 X_0 = Linear([R, G, B, y, x]) + DWConv3x3(Linear([R, G, B, y, x]))
 ```
 
-The point width is `C_p = 128`. No patchify operation or spatial downsampling is
+The point width is `C_p = 256`. No patchify operation or spatial downsampling is
 used. Large images are processed by tiled scans; image size changes compute
 linearly rather than changing the architecture.
 
@@ -83,8 +84,10 @@ pooling. It is not an auxiliary image encoder.
 
 ### 2.2 Transient Slice read
 
-Every layer owns `M = 256` learned Slice queries. Layer-specific queries remove
-the requirement that one routing function serve incompatible feature depths.
+Every layer owns `M = 256` learned Slice queries and its own complete read/write
+module. Assignment projections, value/back projections, local convolutions, and
+point FFNs are not shared across depth. Layer-specific parameters remove the
+requirement that one routing function serve incompatible feature depths.
 
 ```text
 logits[n, m] = <W_point norm(X_local[n]), q_l[m]> / sqrt(C_p)
@@ -111,6 +114,18 @@ after the primary causal gate passes.
 The `N x M` assignment is evaluated in tiles. The implementation must make two
 streaming passes, one for mass-normalized read and one for Deslice, without
 materializing the full assignment matrix.
+
+The implemented scan aggregates in point width before the `C_p -> C_m`
+projection and applies the reverse projection before Deslice. This preserves the
+Transolver-3 matrix-order optimization: only `M` Slice states, rather than `N`
+point states, cross the wider projection. CUDA FP16/BF16 configurations with
+`C_p <= 128` may use the verified fused Triton assignment kernel. The registered
+`C_p = 256` configuration uses PyTorch GEMM/softmax because it is faster on the
+reference RTX 5060 Ti; Triton is not selected merely for implementation novelty.
+
+Training checkpoints each complete per-layer visual read, MoT exchange, and
+write-back unit. Diagnostics stay as detached device tensors so the hot path
+does not introduce per-layer CPU/GPU synchronization.
 
 ### 2.3 Modality-specific MoT block
 
@@ -207,7 +222,7 @@ continuation. Chat-style supervised fine-tuning is outside the primary gate.
 ```yaml
 name: SliceMoT-VLM-6L
 layers: 6
-point_width: 128
+point_width: 256
 mot_width: 512
 visual_slices: 256
 attention_heads: 8
@@ -218,7 +233,7 @@ vocabulary_size: approximately 260
 position_encoding:
   text: 1D RoPE
   visual: Slice centroid 2D RoPE
-estimated_total_parameters: 43M-46M
+estimated_total_parameters: 47.84M
 ```
 
 The text embedding and output head are tied. Visual and text experts are not
