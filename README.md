@@ -32,6 +32,18 @@ This repo measures both sides under a matched token budget:
 
 Published JSON snapshots live in [`results/published/`](results/published/).
 
+## Next experiment: native Slice-MoT VLM
+
+The first realistic vision-language integration is now preregistered in
+[`docs/native_slice_mot_vlm_experiment.md`](docs/native_slice_mot_vlm_experiment.md).
+It replaces frozen-LLM frontend probes with a six-layer model trained jointly
+from random initialization: a persistent full-resolution point field and a
+language stream communicate at every depth through modality-specific
+Mixture-of-Transformers experts. The primary decision gate requires at least
+64M loss-bearing public-data tokens before an architecture conclusion.
+
+This is an experiment design, not a reported result.
+
 ## Layout
 
 ```text
@@ -126,7 +138,10 @@ Open [`present/showcase.html`](present/showcase.html) in a browser for figures (
 - **Patchify ≠ mean pool:** stem is `Conv2d(3 → dim-2, kernel=p, stride=p)` — a learned linear map over the p²×3 window. Mean pooling is only a special case; high-frequency directions *can* survive in the subspace of the kernel. The hard claim is **s/p-limited capacity/SNR and addressing**, not spectral annihilation.
 - **Slice stack:** mass-norm soft pool (**read**) + optional **sparse deslice write** (primary soft-scatter fix: `deslice_topk` / threshold). Optional Qwen gate: residual-dependent post-attn form (arXiv:2505.06708) and/or residual-stream `σ(W x) ⊙ mix`. Optional `recur_T` multi-pass is **fallback only**. Stride-1 DW 3×3 for locality without downsampling.
 - **`G ≤ C` (slice collapse geometry):** slice/query directions live in \(\mathbb{R}^{C}\) with \(C =\) `heads × dim_head` (or full `dim`). At most **C** independent axes. If **`slice_num G > C`** (e.g. 64 queries in 32-d), high `cos_tok` / dead slots are **rank-forced**, not only optim — lower **G** or raise **C**. Defaults here: `G=32`, `C=4×16=64`. See module docstring in `fine_grain/models.py`.
-- **Not in scope:** real OCR/characters (glyph = 4 geometric shapes only), saccadic re-acquisition, multi-hop map reasoning, production VLM training.
+- **Current published-result scope:** real OCR/characters are not yet a published
+  result (glyph = 4 geometric shapes only). The native Slice-MoT VLM document
+  above defines the next experiment; it does not retroactively extend the claims
+  of the synthetic benchmarks.
 
 ## Citation / lineage
 
