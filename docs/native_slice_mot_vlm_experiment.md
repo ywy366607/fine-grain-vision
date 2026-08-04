@@ -101,19 +101,19 @@ stable within a layer.
 
 The registered primary model uses:
 
-- fixed softmax temperature `1.0`;
+- point-adaptive temperature `T_n = clamp(MLP(X_n) + 0.5, min=0.01)`;
 - no Gumbel sampling;
 - no top-k routing;
-- no adaptive temperature;
 - Newton-Schulz Stiefel projection on mass-normalized Slice directions;
 - no learned residual gate.
 
-Point-adaptive temperature, Gumbel assignment, top-k Deslice, and thin-detail
-rescaling remain excluded from the primary run. A controlled eight-way glyph
-gate showed that the unprojected Slice representation stayed at chance while
-Stiefel projection established matched-image dependence. This choice was made
-before the 64M-token run and is recorded as an architecture correction rather
-than selected from downstream validation.
+Gumbel assignment, top-k Deslice, and thin-detail rescaling remain excluded from
+the primary run. A controlled eight-way glyph gate showed that the unprojected
+Slice representation stayed at chance, point temperature produced a weak
+matched-image signal, and Stiefel projection established strong matched-image
+dependence. The registered model retains both non-conflicting read-side
+mechanisms. This choice was made before the 64M-token run and is recorded as an
+architecture correction rather than selected from downstream validation.
 
 The `N x M` assignment is evaluated in tiles. The implementation must make two
 streaming passes, one for mass-normalized read and one for Deslice, without
@@ -237,7 +237,7 @@ vocabulary_size: approximately 260
 position_encoding:
   text: 1D RoPE
   visual: Slice centroid 2D RoPE
-estimated_total_parameters: 47.84M
+estimated_total_parameters: 48.23M
 ```
 
 The text embedding and output head are tied. Visual and text experts are not

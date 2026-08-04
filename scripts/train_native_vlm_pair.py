@@ -67,6 +67,9 @@ def slice_ablation_arguments(name: str) -> dict[str, object]:
         arguments["stiefel_slices"] = True
     elif name == "topk2_write":
         arguments["deslice_topk"] = 2
+    elif name == "stiefel_point_temp":
+        arguments["stiefel_slices"] = True
+        arguments["point_adaptive_temperature"] = True
     elif name != "base":
         raise ValueError(f"unknown Slice ablation: {name}")
     return arguments
@@ -203,8 +206,16 @@ def main() -> None:
     parser.add_argument("--compile", action="store_true")
     parser.add_argument(
         "--slice-ablation",
-        choices=("base", "detailstd", "point_temp", "gumbel", "stiefel_ns", "topk2_write"),
-        default="stiefel_ns",
+        choices=(
+            "base",
+            "detailstd",
+            "point_temp",
+            "gumbel",
+            "stiefel_ns",
+            "topk2_write",
+            "stiefel_point_temp",
+        ),
+        default="stiefel_point_temp",
     )
     args = parser.parse_args()
 

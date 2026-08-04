@@ -35,7 +35,7 @@ class SliceMoTConfig:
     assignment_backend: str = "auto"
     activation_checkpointing: bool = True
     standardize_thin_detail: bool = False
-    point_adaptive_temperature: bool = False
+    point_adaptive_temperature: bool = True
     gumbel_assignment: bool = False
     stiefel_slices: bool = True
     deslice_topk: int = 0

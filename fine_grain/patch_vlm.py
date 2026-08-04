@@ -21,7 +21,7 @@ class PatchMoTConfig:
     attention_heads: int = 8
     visual_ffn_width: int = 1536
     text_ffn_width: int = 1536
-    patch_ffn_width: int = 512
+    patch_ffn_width: int = 562
     vocabulary_size: int = VOCAB_SIZE
     image_size: int = 256
     patch_size: int = 16
