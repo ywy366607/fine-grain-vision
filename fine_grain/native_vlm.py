@@ -14,6 +14,7 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
 from fine_grain.byte_tokenizer import BOS_ID, EOS_ID, PAD_ID, VOCAB_SIZE
+from fine_grain.models import newton_schulz, sparse_deslice_weights
 from fine_grain.slice_kernels import slice_assignment
 
 
@@ -33,6 +34,11 @@ class SliceMoTConfig:
     dropout: float = 0.0
     assignment_backend: str = "auto"
     activation_checkpointing: bool = True
+    standardize_thin_detail: bool = False
+    point_adaptive_temperature: bool = False
+    gumbel_assignment: bool = False
+    stiefel_slices: bool = True
+    deslice_topk: int = 0
 
     def __post_init__(self) -> None:
         values = (
@@ -53,6 +59,8 @@ class SliceMoTConfig:
             raise ValueError("attention head width must be divisible by four for 2D RoPE")
         if self.assignment_backend not in {"auto", "torch", "triton"}:
             raise ValueError("assignment_backend must be auto, torch, or triton")
+        if self.deslice_topk < 0 or self.deslice_topk > self.visual_slices:
+            raise ValueError("deslice_topk must be between zero and visual_slices")
 
 
 @dataclass
@@ -139,6 +147,11 @@ class PersistentSliceLayer(nn.Module):
         self.visual_slices = config.visual_slices
         self.tile_points = config.tile_points
         self.assignment_backend = config.assignment_backend
+        self.standardize_thin_detail = config.standardize_thin_detail
+        self.point_adaptive_temperature = config.point_adaptive_temperature
+        self.gumbel_assignment = config.gumbel_assignment
+        self.stiefel_slices = config.stiefel_slices
+        self.deslice_topk = config.deslice_topk
 
         self.pre_norm = nn.RMSNorm(point_width)
         self.pre_local = nn.Sequential(
@@ -149,6 +162,17 @@ class PersistentSliceLayer(nn.Module):
         nn.init.orthogonal_(self.assignment_key.weight)
         self.slice_queries = nn.Parameter(torch.empty(config.visual_slices, point_width))
         nn.init.normal_(self.slice_queries)
+        if self.point_adaptive_temperature:
+            self.temperature_projection = nn.Sequential(
+                nn.Linear(point_width, config.visual_slices),
+                nn.GELU(),
+                nn.Linear(config.visual_slices, 1),
+                nn.GELU(),
+            )
+            self.temperature_bias = nn.Parameter(torch.tensor(0.5))
+        else:
+            self.temperature_projection = None
+            self.register_parameter("temperature_bias", None)
         self.point_value = nn.Linear(point_width, model_width, bias=False)
         self.workspace_to_point = nn.Linear(model_width, point_width, bias=False)
         self.point_ffn_norm = nn.RMSNorm(point_width)
@@ -179,12 +203,29 @@ class PersistentSliceLayer(nn.Module):
         self, points: torch.Tensor, fused_weight: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         normalized = self.pre_norm(points)
-        weights = slice_assignment(
-            normalized, fused_weight, backend=self.assignment_backend
-        )
+        if self.temperature_projection is None and not (
+            self.training and self.gumbel_assignment
+        ):
+            weights = slice_assignment(
+                normalized, fused_weight, backend=self.assignment_backend
+            )
+        else:
+            logits = F.linear(normalized, fused_weight) / math.sqrt(self.point_width)
+            if self.training and self.gumbel_assignment:
+                uniform = torch.rand_like(logits).clamp_(1e-6, 1.0 - 1e-6)
+                logits = logits - torch.log(-torch.log(uniform))
+            if self.temperature_projection is None:
+                temperature = 1.0
+            else:
+                temperature = (
+                    self.temperature_projection(normalized) + self.temperature_bias
+                ).clamp_min(0.01)
+            weights = F.softmax(logits / temperature, dim=-1)
         return weights, normalized
 
-    def read(self, field: VisualField) -> tuple[torch.Tensor, torch.Tensor]:
+    def read(
+        self, field: VisualField, *, collect_diagnostics: bool = True
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         batch = field.points.shape[0]
         numerator = torch.zeros(
             batch,
@@ -206,7 +247,17 @@ class PersistentSliceLayer(nn.Module):
             device=field.points.device,
             dtype=torch.float32,
         )
-        entropy_sum = torch.zeros((), device=field.points.device, dtype=torch.float32)
+        global_numerator = torch.zeros(
+            batch,
+            self.point_width,
+            device=field.points.device,
+            dtype=torch.float32,
+        )
+        entropy_sum = None
+        if collect_diagnostics:
+            entropy_sum = torch.zeros(
+                (), device=field.points.device, dtype=torch.float32
+            )
         fused_weight = self._fused_assignment_weight()
 
         for start in range(0, field.points.shape[1], self.tile_points):
@@ -224,28 +275,46 @@ class PersistentSliceLayer(nn.Module):
                 field.coordinates[:, start:end].float(),
             )
             mass = mass + weights_float.sum(dim=1)
-            entropy_sum = entropy_sum - (
-                weights_float * weights_float.clamp_min(1e-12).log()
-            ).sum()
+            global_numerator = global_numerator + normalized.float().sum(dim=1)
+            if entropy_sum is not None:
+                entropy_sum = entropy_sum - (
+                    weights_float * weights_float.clamp_min(1e-12).log()
+                ).sum()
 
         raw_slices = numerator / mass.clamp_min(1e-6).unsqueeze(-1)
+        if self.standardize_thin_detail:
+            # A one-pixel curve occupies O(sqrt(N)) points. Global averaging
+            # attenuates it by 1/sqrt(N), so restore that statistical scale
+            # while retaining the global low-frequency component.
+            global_mean = (
+                global_numerator / field.points.shape[1]
+            ).unsqueeze(1)
+            detail_gain = math.sqrt(field.points.shape[1])
+            raw_slices = global_mean + detail_gain * (raw_slices - global_mean)
         # Linear associativity: aggregate in point width, then project only M states.
         slices = self.point_value(raw_slices.to(field.points))
+        if self.stiefel_slices:
+            directions = slices.transpose(1, 2)
+            magnitude = directions.norm(dim=1, keepdim=True).clamp_min(1e-6)
+            directions = newton_schulz(directions)
+            slices = (directions * magnitude).transpose(1, 2)
         centroids = coordinate_numerator / mass.clamp_min(1e-6).unsqueeze(-1)
-        probability = mass / mass.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-        effective = torch.exp(
-            -(probability * probability.clamp_min(1e-12).log()).sum(dim=-1)
-        )
-        entropy = entropy_sum / (field.points.shape[0] * field.points.shape[1])
-        self.last_diagnostics = {
-            # Keep diagnostics on device. Converting to Python scalars here
-            # would synchronize CUDA once per visual layer and training step.
-            "assignment_entropy": entropy.detach(),
-            "effective_slices": effective.mean().detach(),
-            "point_count": torch.as_tensor(
-                field.points.shape[1], device=field.points.device
-            ),
-        }
+        self.last_diagnostics = {}
+        if entropy_sum is not None:
+            probability = mass / mass.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+            effective = torch.exp(
+                -(probability * probability.clamp_min(1e-12).log()).sum(dim=-1)
+            )
+            entropy = entropy_sum / (field.points.shape[0] * field.points.shape[1])
+            self.last_diagnostics = {
+                # Keep diagnostics on device. Converting to Python scalars here
+                # would synchronize CUDA once per visual layer and training step.
+                "assignment_entropy": entropy.detach(),
+                "effective_slices": effective.mean().detach(),
+                "point_count": torch.as_tensor(
+                    field.points.shape[1], device=field.points.device
+                ),
+            }
         return slices.to(field.points), centroids.to(field.points)
 
     def write(self, field: VisualField, workspace: torch.Tensor) -> VisualField:
@@ -257,6 +326,8 @@ class PersistentSliceLayer(nn.Module):
             end = min(field.points.shape[1], start + self.tile_points)
             points = field.points[:, start:end]
             weights, _ = self._weights(points, fused_weight)
+            if self.deslice_topk:
+                weights = sparse_deslice_weights(weights, topk=self.deslice_topk)
             message = torch.einsum("bnm,bmc->bnc", weights, projected)
             updated = points + message
             updated = updated + self.point_ffn(self.point_ffn_norm(updated))
@@ -537,10 +608,13 @@ class SliceMoTVLM(nn.Module):
         mot_block: MoTBlock,
         prompt_length: int,
         text_valid: torch.Tensor,
+        collect_diagnostics: bool,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         field = VisualField(points, coordinates, grid_shape)
         field = visual_layer.local_update(field)
-        slices, centroids = visual_layer.read(field)
+        slices, centroids = visual_layer.read(
+            field, collect_diagnostics=collect_diagnostics
+        )
         slices, text = mot_block(
             text,
             prompt_length=prompt_length,
@@ -561,6 +635,7 @@ class SliceMoTVLM(nn.Module):
         images: torch.Tensor | None = None,
         labels: torch.Tensor | None = None,
         return_state: bool = False,
+        collect_diagnostics: bool = True,
     ) -> SliceMoTOutput:
         if prompt_ids.ndim != 2 or target_input_ids.ndim != 2:
             raise ValueError("token inputs must have shape [batch, sequence]")
@@ -605,6 +680,7 @@ class SliceMoTVLM(nn.Module):
                     block,
                     prompt_ids.shape[1],
                     text_valid,
+                    collect_diagnostics,
                 )
             if self.training and self.config.activation_checkpointing:
                 points, text = checkpoint(
@@ -615,7 +691,8 @@ class SliceMoTVLM(nn.Module):
             field_state = VisualField(
                 points, field_state.coordinates, field_state.grid_shape
             )
-            diagnostics.append(dict(visual_layer.last_diagnostics))
+            if collect_diagnostics:
+                diagnostics.append(dict(visual_layer.last_diagnostics))
 
         target_states = self.final_norm(text[:, prompt_ids.shape[1] :])
         logits = self.lm_head(target_states)

@@ -193,6 +193,7 @@ class PatchMoTVLM(nn.Module):
         images: torch.Tensor | None = None,
         labels: torch.Tensor | None = None,
         return_state: bool = False,
+        collect_diagnostics: bool = True,
     ) -> SliceMoTOutput:
         if prompt_ids.ndim != 2 or target_input_ids.ndim != 2:
             raise ValueError("token inputs must have shape [batch, sequence]")

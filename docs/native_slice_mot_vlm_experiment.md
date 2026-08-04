@@ -105,11 +105,15 @@ The registered primary model uses:
 - no Gumbel sampling;
 - no top-k routing;
 - no adaptive temperature;
-- no Stiefel projection;
+- Newton-Schulz Stiefel projection on mass-normalized Slice directions;
 - no learned residual gate.
 
-These mechanisms are excluded from the primary test. They may be studied only
-after the primary causal gate passes.
+Point-adaptive temperature, Gumbel assignment, top-k Deslice, and thin-detail
+rescaling remain excluded from the primary run. A controlled eight-way glyph
+gate showed that the unprojected Slice representation stayed at chance while
+Stiefel projection established matched-image dependence. This choice was made
+before the 64M-token run and is recorded as an architecture correction rather
+than selected from downstream validation.
 
 The `N x M` assignment is evaluated in tiles. The implementation must make two
 streaming passes, one for mass-normalized read and one for Deslice, without
@@ -294,6 +298,7 @@ effective_batch: at least 32768 loss-bearing tokens
 sequence_length: 512 initially, 1024 for the final document portion
 activation_checkpointing: true
 assignment_scan: tiled, checkpointed
+slice_direction_projection: Newton-Schulz Stiefel, 5 steps
 ```
 
 The data mixture may be shuffled, but its registered token totals may not be
