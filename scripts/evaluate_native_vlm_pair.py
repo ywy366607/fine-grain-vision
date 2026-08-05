@@ -168,6 +168,18 @@ def main() -> None:
             )
             if not can_perturb:
                 continue
+            for index, source in enumerate(batch.sources):
+                add_metric(
+                    metrics, source, "blank_matched_loss_sum", float(loss_sum[index])
+                )
+                add_metric(metrics, source, "blank_matched_tokens", int(counts[index]))
+                add_metric(metrics, source, "blank_matched_samples", 1)
+                add_metric(
+                    metrics,
+                    source,
+                    "blank_matched_first_loss_sum",
+                    float(first_loss[index]),
+                )
             blank_images = torch.ones_like(batch.images)
             with amp_context():
                 blank = model(
@@ -190,6 +202,23 @@ def main() -> None:
                 )
 
             if batch.images.shape[0] > 1:
+                for index, source in enumerate(batch.sources):
+                    add_metric(
+                        metrics,
+                        source,
+                        "shuffled_matched_loss_sum",
+                        float(loss_sum[index]),
+                    )
+                    add_metric(
+                        metrics, source, "shuffled_matched_tokens", int(counts[index])
+                    )
+                    add_metric(metrics, source, "shuffled_matched_samples", 1)
+                    add_metric(
+                        metrics,
+                        source,
+                        "shuffled_matched_first_loss_sum",
+                        float(first_loss[index]),
+                    )
                 shuffled_images = batch.images.roll(1, dims=0)
                 with amp_context():
                     shuffled = model(
@@ -225,17 +254,32 @@ def main() -> None:
         row["matched_first_byte_accuracy"] = row["matched_first_correct"] / row["samples"]
         if row.get("blank_tokens"):
             row["blank_nll"] = row["blank_loss_sum"] / row["blank_tokens"]
-            row["blank_minus_matched_nll"] = row["blank_nll"] - row["matched_nll"]
+            row["blank_matched_nll"] = (
+                row["blank_matched_loss_sum"] / row["blank_matched_tokens"]
+            )
+            row["blank_minus_matched_nll"] = (
+                row["blank_nll"] - row["blank_matched_nll"]
+            )
             row["blank_first_byte_nll"] = (
                 row["blank_first_loss_sum"] / row["blank_samples"]
             )
+            row["blank_matched_first_byte_nll"] = (
+                row["blank_matched_first_loss_sum"] / row["blank_matched_samples"]
+            )
         if row.get("shuffled_tokens"):
             row["shuffled_nll"] = row["shuffled_loss_sum"] / row["shuffled_tokens"]
+            row["shuffled_matched_nll"] = (
+                row["shuffled_matched_loss_sum"] / row["shuffled_matched_tokens"]
+            )
             row["shuffled_minus_matched_nll"] = (
-                row["shuffled_nll"] - row["matched_nll"]
+                row["shuffled_nll"] - row["shuffled_matched_nll"]
             )
             row["shuffled_first_byte_nll"] = (
                 row["shuffled_first_loss_sum"] / row["shuffled_samples"]
+            )
+            row["shuffled_matched_first_byte_nll"] = (
+                row["shuffled_matched_first_loss_sum"]
+                / row["shuffled_matched_samples"]
             )
         for key, value in row.items():
             if key.endswith("_sum") or key in {
@@ -247,6 +291,10 @@ def main() -> None:
                 "blank_samples",
                 "shuffled_tokens",
                 "shuffled_samples",
+                "blank_matched_tokens",
+                "blank_matched_samples",
+                "shuffled_matched_tokens",
+                "shuffled_matched_samples",
             }:
                 total[key] = total.get(key, 0.0) + value
     total["matched_nll"] = total["matched_loss_sum"] / total["tokens"]
@@ -257,13 +305,33 @@ def main() -> None:
     )
     if total.get("blank_tokens"):
         total["blank_nll"] = total["blank_loss_sum"] / total["blank_tokens"]
+        total["blank_matched_nll"] = (
+            total["blank_matched_loss_sum"] / total["blank_matched_tokens"]
+        )
+        total["blank_minus_matched_nll"] = (
+            total["blank_nll"] - total["blank_matched_nll"]
+        )
         total["blank_first_byte_nll"] = (
             total["blank_first_loss_sum"] / total["blank_samples"]
         )
+        total["blank_matched_first_byte_nll"] = (
+            total["blank_matched_first_loss_sum"]
+            / total["blank_matched_samples"]
+        )
     if total.get("shuffled_tokens"):
         total["shuffled_nll"] = total["shuffled_loss_sum"] / total["shuffled_tokens"]
+        total["shuffled_matched_nll"] = (
+            total["shuffled_matched_loss_sum"] / total["shuffled_matched_tokens"]
+        )
+        total["shuffled_minus_matched_nll"] = (
+            total["shuffled_nll"] - total["shuffled_matched_nll"]
+        )
         total["shuffled_first_byte_nll"] = (
             total["shuffled_first_loss_sum"] / total["shuffled_samples"]
+        )
+        total["shuffled_matched_first_byte_nll"] = (
+            total["shuffled_matched_first_loss_sum"]
+            / total["shuffled_matched_samples"]
         )
     report = {
         "arm": checkpoint["arm"],
