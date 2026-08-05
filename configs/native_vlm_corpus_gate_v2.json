@@ -11,12 +11,10 @@
   "cauldron": [
     {"config": "diagram_image_to_text", "target_bytes": 92724},
     {"config": "infographic_vqa", "target_bytes": 100468},
-    {"config": "docvqa", "target_bytes": 127990},
+    {"config": "docvqa", "target_bytes": 156058},
     {"config": "plotqa", "target_bytes": 1500000},
     {"config": "dvqa", "target_bytes": 1500000},
     {"config": "figureqa", "target_bytes": 1000000},
-    {"config": "tallyqa", "target_bytes": 750000},
-    {"config": "chartqa", "target_bytes": 500000},
-    {"config": "ai2d", "target_bytes": 250000}
+    {"config": "tallyqa", "target_bytes": 148927}
   ]
 }

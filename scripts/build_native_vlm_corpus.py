@@ -612,6 +612,7 @@ def main() -> None:
     parser.add_argument("--database", required=True)
     parser.add_argument("--recipe")
     parser.add_argument("--existing-database")
+    parser.add_argument("--finalize-only", action="store_true")
     parser.add_argument("--schedule")
     parser.add_argument("--validation-schedule")
     parser.add_argument("--report")
@@ -682,73 +683,74 @@ def main() -> None:
 
     actions = {}
     with CorpusWriter(args.database) as writer:
-        for item in existing_specs:
-            source = item["source"]
-            actions[f"existing_{source}"] = import_existing_source(
-                writer,
-                args.existing_database,
-                source=source,
-                budget=int(item["target_bytes"]),
-            )
-        if args.latex_parquet:
-            actions["latex_ocr"] = add_parquet_ocr(
-                writer,
-                args.latex_parquet,
-                source="latex_ocr",
-                task="ocr",
-                text_column="text",
-                budget=args.latex_budget,
-                maximum_target_bytes=args.max_target_bytes,
-            )
-        if args.scut_parquet:
-            actions["scut_hccdoc"] = add_parquet_ocr(
-                writer,
-                args.scut_parquet,
-                source="scut_hccdoc",
-                task="document",
-                text_column="texts",
-                budget=args.scut_budget,
-                maximum_target_bytes=args.document_target_bytes,
-            )
-        if bool(args.olm_parquet) != bool(args.olm_tar):
-            parser.error("--olm-parquet and --olm-tar must be provided together")
-        if args.olm_parquet:
-            actions["olmocr_mix"] = add_olmocr(
-                writer,
-                args.olm_parquet,
-                args.olm_tar,
-                budget=args.olm_budget,
-                maximum_target_bytes=args.document_target_bytes,
-                workers=args.workers,
-                render_size=args.render_size,
-            )
-        if args.fineweb:
-            actions["fineweb_edu"] = add_fineweb(
-                writer,
-                budget=args.fineweb_budget,
-                maximum_target_bytes=args.max_target_bytes,
-                prompt_bytes=args.prompt_bytes,
-            )
-        for config, budget in parse_source_budgets(cauldron_specs):
-            source = f"cauldron_{config}"
-            actions[source] = add_qa_rows(
-                writer,
-                source=source,
-                rows=cauldron_rows(config, cauldron_revision),
-                budget=budget,
-                maximum_target_bytes=args.max_target_bytes,
-                maximum_image_side=args.maximum_image_side,
-            )
-        for config, budget in parse_source_budgets(pixmo_docs_specs):
-            source = f"pixmo_docs_{config}"
-            actions[source] = add_qa_rows(
-                writer,
-                source=source,
-                rows=pixmo_docs_rows(config, pixmo_docs_revision),
-                budget=budget,
-                maximum_target_bytes=args.max_target_bytes,
-                maximum_image_side=args.maximum_image_side,
-            )
+        if not args.finalize_only:
+            for item in existing_specs:
+                source = item["source"]
+                actions[f"existing_{source}"] = import_existing_source(
+                    writer,
+                    args.existing_database,
+                    source=source,
+                    budget=int(item["target_bytes"]),
+                )
+            if args.latex_parquet:
+                actions["latex_ocr"] = add_parquet_ocr(
+                    writer,
+                    args.latex_parquet,
+                    source="latex_ocr",
+                    task="ocr",
+                    text_column="text",
+                    budget=args.latex_budget,
+                    maximum_target_bytes=args.max_target_bytes,
+                )
+            if args.scut_parquet:
+                actions["scut_hccdoc"] = add_parquet_ocr(
+                    writer,
+                    args.scut_parquet,
+                    source="scut_hccdoc",
+                    task="document",
+                    text_column="texts",
+                    budget=args.scut_budget,
+                    maximum_target_bytes=args.document_target_bytes,
+                )
+            if bool(args.olm_parquet) != bool(args.olm_tar):
+                parser.error("--olm-parquet and --olm-tar must be provided together")
+            if args.olm_parquet:
+                actions["olmocr_mix"] = add_olmocr(
+                    writer,
+                    args.olm_parquet,
+                    args.olm_tar,
+                    budget=args.olm_budget,
+                    maximum_target_bytes=args.document_target_bytes,
+                    workers=args.workers,
+                    render_size=args.render_size,
+                )
+            if args.fineweb:
+                actions["fineweb_edu"] = add_fineweb(
+                    writer,
+                    budget=args.fineweb_budget,
+                    maximum_target_bytes=args.max_target_bytes,
+                    prompt_bytes=args.prompt_bytes,
+                )
+            for config, budget in parse_source_budgets(cauldron_specs):
+                source = f"cauldron_{config}"
+                actions[source] = add_qa_rows(
+                    writer,
+                    source=source,
+                    rows=cauldron_rows(config, cauldron_revision),
+                    budget=budget,
+                    maximum_target_bytes=args.max_target_bytes,
+                    maximum_image_side=args.maximum_image_side,
+                )
+            for config, budget in parse_source_budgets(pixmo_docs_specs):
+                source = f"pixmo_docs_{config}"
+                actions[source] = add_qa_rows(
+                    writer,
+                    source=source,
+                    rows=pixmo_docs_rows(config, pixmo_docs_revision),
+                    budget=budget,
+                    maximum_target_bytes=args.max_target_bytes,
+                    maximum_image_side=args.maximum_image_side,
+                )
         writer.set_metadata("build_arguments", vars(args))
         writer.set_metadata(
             "resolved_public_recipe",

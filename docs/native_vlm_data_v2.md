@@ -26,9 +26,9 @@ occupy approximately 78 GB. Existing local LaTeX OCR, olmOCR, and SCUT data are
 retained, while pure text is capped at 8M target bytes.
 
 For the architecture gate, `configs/native_vlm_corpus_gate_v2.json` is the
-registered first run. It retains the bounded local sources and adds only 5.5M
-bytes of short-answer chart, counting, and diagram supervision. This keeps the
-whole gate near 27M target bytes. The 82.1M recipe is archival until the compact
+registered first run. It retains the bounded local sources and adds 4.5M bytes
+of short-answer chart, counting, and diagram supervision. This keeps the whole
+gate at 25.45M target bytes. The 82.1M recipe is archival until the compact
 run demonstrates positive image causality.
 
 [`allenai/pixmo-docs`](https://huggingface.co/datasets/allenai/pixmo-docs)
