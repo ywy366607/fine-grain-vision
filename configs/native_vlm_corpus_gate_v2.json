@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "purpose": "Bounded visual-causality gate before full pretraining",
+  "cauldron_revision": "847a98a779b1652d65111daf20c972dfcd333605",
+  "existing": [
+    {"source": "fineweb_edu", "target_bytes": 8000000},
+    {"source": "latex_ocr", "target_bytes": 8000000},
+    {"source": "olmocr_mix", "target_bytes": 6000000},
+    {"source": "scut_hccdoc", "target_bytes": 2000000}
+  ],
+  "cauldron": [
+    {"config": "diagram_image_to_text", "target_bytes": 92724},
+    {"config": "infographic_vqa", "target_bytes": 100468},
+    {"config": "docvqa", "target_bytes": 127990},
+    {"config": "plotqa", "target_bytes": 1500000},
+    {"config": "dvqa", "target_bytes": 1500000},
+    {"config": "figureqa", "target_bytes": 1000000},
+    {"config": "tallyqa", "target_bytes": 750000},
+    {"config": "chartqa", "target_bytes": 500000},
+    {"config": "ai2d", "target_bytes": 250000}
+  ]
+}
