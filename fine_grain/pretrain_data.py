@@ -18,7 +18,7 @@ from torch.utils.data import Dataset, Sampler
 from fine_grain.byte_tokenizer import ByteTokenizer, TeacherForcingBatch
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -104,6 +104,12 @@ class CorpusWriter:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS images (
+                image_id TEXT PRIMARY KEY,
+                payload BLOB NOT NULL,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS samples (
                 sample_id TEXT PRIMARY KEY,
                 source TEXT NOT NULL,
@@ -114,12 +120,20 @@ class CorpusWriter:
                 target_text TEXT NOT NULL,
                 target_bytes INTEGER NOT NULL,
                 width INTEGER,
-                height INTEGER
+                height INTEGER,
+                image_id TEXT REFERENCES images(image_id)
             );
             CREATE INDEX IF NOT EXISTS samples_split_source
                 ON samples(split, source, sample_id);
             """
         )
+        columns = {
+            row[1] for row in self.connection.execute("PRAGMA table_info(samples)")
+        }
+        if "image_id" not in columns:
+            self.connection.execute(
+                "ALTER TABLE samples ADD COLUMN image_id TEXT REFERENCES images(image_id)"
+            )
         self.connection.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -128,24 +142,35 @@ class CorpusWriter:
     def add(self, record: CorpusRecord) -> bool:
         if not record.target_text:
             return False
+        image_id = None
+        if record.image_bytes is not None:
+            if record.width is None or record.height is None:
+                raise ValueError("image dimensions are required with image bytes")
+            image_id = hashlib.sha256(record.image_bytes).hexdigest()
+            self.connection.execute(
+                "INSERT OR IGNORE INTO images(image_id, payload, width, height) "
+                "VALUES (?, ?, ?, ?)",
+                (image_id, record.image_bytes, record.width, record.height),
+            )
         cursor = self.connection.execute(
             """
             INSERT OR IGNORE INTO samples(
                 sample_id, source, split, task, image, prompt_text, target_text,
-                target_bytes, width, height
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                target_bytes, width, height, image_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.sample_id,
                 record.source,
                 record.split,
                 record.task,
-                record.image_bytes,
+                None,
                 record.prompt_text,
                 record.target_text,
                 record.target_bytes,
                 record.width,
                 record.height,
+                image_id,
             ),
         )
         return cursor.rowcount == 1
@@ -222,6 +247,7 @@ class SQLiteVLMData(Dataset[CorpusRecord]):
         with Path(schedule).open(encoding="utf-8") as handle:
             self.schedule = [json.loads(line) for line in handle if line.strip()]
         self._connection: sqlite3.Connection | None = None
+        self._normalized_images = False
 
     def __len__(self) -> int:
         return len(self.schedule)
@@ -232,15 +258,31 @@ class SQLiteVLMData(Dataset[CorpusRecord]):
                 f"file:{self.database}?mode=ro", uri=True, check_same_thread=False
             )
             self._connection.execute("PRAGMA query_only=ON")
+            columns = {
+                row[1]
+                for row in self._connection.execute("PRAGMA table_info(samples)")
+            }
+            self._normalized_images = "image_id" in columns
         return self._connection
 
     def __getitem__(self, index: int) -> CorpusRecord:
         scheduled = self.schedule[index]
-        row = self._db().execute(
-            "SELECT sample_id, source, split, task, prompt_text, target_text, "
-            "image, width, height FROM samples WHERE rowid=?",
-            (scheduled["rowid"],),
-        ).fetchone()
+        connection = self._db()
+        if self._normalized_images:
+            row = connection.execute(
+                "SELECT s.sample_id, s.source, s.split, s.task, s.prompt_text, "
+                "s.target_text, COALESCE(s.image, i.payload), "
+                "COALESCE(s.width, i.width), COALESCE(s.height, i.height) "
+                "FROM samples AS s LEFT JOIN images AS i ON i.image_id=s.image_id "
+                "WHERE s.rowid=?",
+                (scheduled["rowid"],),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                "SELECT sample_id, source, split, task, prompt_text, target_text, "
+                "image, width, height FROM samples WHERE rowid=?",
+                (scheduled["rowid"],),
+            ).fetchone()
         if row is None or row[0] != scheduled["sample_id"]:
             raise RuntimeError("corpus no longer matches the immutable schedule")
         return CorpusRecord(*row[:6], image_bytes=row[6], width=row[7], height=row[8])

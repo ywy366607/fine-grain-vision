@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "existing": [
+    {"source": "fineweb_edu", "target_bytes": 8000000},
+    {"source": "latex_ocr", "target_bytes": 8000000},
+    {"source": "olmocr_mix", "target_bytes": 6000000},
+    {"source": "scut_hccdoc", "target_bytes": 2000000}
+  ],
+  "cauldron_revision": "847a98a779b1652d65111daf20c972dfcd333605",
+  "cauldron": [
+    {"config": "diagram_image_to_text", "target_bytes": 100000},
+    {"config": "infographic_vqa", "target_bytes": 1000000},
+    {"config": "docvqa", "target_bytes": 4000000},
+    {"config": "ocrvqa", "target_bytes": 8000000},
+    {"config": "textvqa", "target_bytes": 4000000},
+    {"config": "st_vqa", "target_bytes": 3000000},
+    {"config": "iam", "target_bytes": 3000000},
+    {"config": "chartqa", "target_bytes": 3000000},
+    {"config": "plotqa", "target_bytes": 8000000},
+    {"config": "figureqa", "target_bytes": 6000000},
+    {"config": "dvqa", "target_bytes": 8000000},
+    {"config": "ai2d", "target_bytes": 2000000},
+    {"config": "tallyqa", "target_bytes": 6000000},
+    {"config": "vqav2", "target_bytes": 8000000},
+    {"config": "localized_narratives", "target_bytes": 8000000},
+    {"config": "screen2words", "target_bytes": 2000000},
+    {"config": "websight", "target_bytes": 4000000},
+    {"config": "datikz", "target_bytes": 4000000}
+  ],
+  "excluded": [
+    {
+      "dataset": "HuggingFaceM4/the_cauldron",
+      "config": "clevr_math",
+      "reason": "Published parquet references private absolute image paths."
+    },
+    {
+      "dataset": "lmms-lab/LLaVA-OneVision-Mid-Data",
+      "reason": "Dataset card restricts use to academic research and education."
+    },
+    {
+      "dataset": "wendlerc/RenderedText",
+      "reason": "The 12.9 TB source has no declared dataset license; use local rendering instead."
+    }
+  ]
+}

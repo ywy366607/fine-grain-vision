@@ -12,7 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import tarfile
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from PIL import Image
 import pyarrow.parquet as pq
@@ -47,6 +47,41 @@ def image_dimensions(payload: bytes) -> tuple[int, int]:
         return image.width, image.height
 
 
+def encode_training_image(image: object, maximum_side: int) -> tuple[bytes, int, int]:
+    """Bound storage while retaining substantially more detail than training crops."""
+    if isinstance(image, dict):
+        if image.get("bytes") is not None:
+            image = io.BytesIO(image["bytes"])
+        elif image.get("path"):
+            image = image["path"]
+        else:
+            raise ValueError("image payload has neither bytes nor path")
+    with Image.open(image) if not isinstance(image, Image.Image) else image as opened:
+        prepared = opened.convert("RGB")
+        prepared.thumbnail((maximum_side, maximum_side), Image.Resampling.LANCZOS)
+        buffer = io.BytesIO()
+        prepared.save(buffer, format="JPEG", quality=90, optimize=True)
+        return buffer.getvalue(), prepared.width, prepared.height
+
+
+def parse_source_budgets(values: list[str]) -> list[tuple[str, int]]:
+    parsed = []
+    for value in values:
+        try:
+            name, budget_text = value.rsplit("=", 1)
+            budget = int(budget_text.replace("_", ""))
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                f"expected CONFIG=TARGET_BYTES, received {value!r}"
+            ) from error
+        if not name or budget < 1:
+            raise argparse.ArgumentTypeError(
+                f"invalid source budget {value!r}"
+            )
+        parsed.append((name, budget))
+    return parsed
+
+
 def source_train_tokens(writer: CorpusWriter, source: str) -> int:
     row = writer.connection.execute(
         "SELECT COALESCE(SUM(target_bytes), 0) FROM samples "
@@ -54,6 +89,59 @@ def source_train_tokens(writer: CorpusWriter, source: str) -> int:
         (source,),
     ).fetchone()
     return int(row[0])
+
+
+def import_existing_source(
+    writer: CorpusWriter,
+    database: str,
+    *,
+    source: str,
+    budget: int,
+) -> dict[str, int]:
+    """Migrate a bounded source from a v1 corpus into normalized schema v2."""
+    train_tokens = source_train_tokens(writer, source)
+    inserted = 0
+    connection = sqlite3.connect(
+        f"file:{Path(database).resolve()}?mode=ro", uri=True
+    )
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(samples)")}
+    if "image_id" in columns:
+        rows = connection.execute(
+            "SELECT s.sample_id, s.source, s.split, s.task, s.prompt_text, "
+            "s.target_text, COALESCE(s.image, i.payload), "
+            "COALESCE(s.width, i.width), COALESCE(s.height, i.height) "
+            "FROM samples AS s LEFT JOIN images AS i ON i.image_id=s.image_id "
+            "WHERE s.source=? ORDER BY s.sample_id",
+            (source,),
+        )
+    else:
+        rows = connection.execute(
+            "SELECT sample_id, source, split, task, prompt_text, target_text, "
+            "image, width, height FROM samples WHERE source=? ORDER BY sample_id",
+            (source,),
+        )
+    for row in rows:
+        record = CorpusRecord(*row[:6], image_bytes=row[6], width=row[7], height=row[8])
+        if record.split == "train":
+            target = truncate_utf8(
+                record.target_text, max(budget - train_tokens - 1, 0)
+            )
+            if not target:
+                break
+            record = CorpusRecord(
+                **{**record.__dict__, "target_text": target}
+            )
+        if writer.add(record):
+            inserted += 1
+            if record.split == "train":
+                train_tokens += record.target_bytes
+        if inserted and inserted % 5000 == 0:
+            writer.commit()
+        if train_tokens >= budget:
+            break
+    connection.close()
+    writer.commit()
+    return {"inserted": inserted, "train_tokens": train_tokens}
 
 
 def add_parquet_ocr(
@@ -194,6 +282,136 @@ def add_fineweb(
                 return {"inserted": inserted, "train_tokens": train_tokens}
     writer.commit()
     return {"inserted": inserted, "train_tokens": train_tokens}
+
+
+def add_qa_rows(
+    writer: CorpusWriter,
+    *,
+    source: str,
+    rows: Iterable[tuple[str, object, Iterable[tuple[str, str]]]],
+    budget: int,
+    maximum_target_bytes: int,
+    maximum_image_side: int,
+) -> dict[str, int]:
+    """Store one image once while flattening its independent question-answer pairs."""
+    train_tokens = source_train_tokens(writer, source)
+    inserted = failed = skipped_multi_image = 0
+    existing_sample_ids = {
+        row[0]
+        for row in writer.connection.execute(
+            "SELECT sample_id FROM samples WHERE source=?", (source,)
+        )
+    }
+    for image_key, image, conversations in rows:
+        split = stable_validation_split(f"{source}:{image_key}")
+        prepared = []
+        reserved_train_tokens = train_tokens
+        for qa_index, (prompt, answer) in enumerate(conversations):
+            sample_id = f"{source}:{image_key}:{qa_index:04d}"
+            if sample_id in existing_sample_ids:
+                continue
+            limit = maximum_target_bytes
+            if split == "train":
+                limit = min(limit, max(budget - reserved_train_tokens - 1, 0))
+            target = truncate_utf8(answer or "", limit)
+            if target:
+                prepared.append((sample_id, prompt or "", target))
+                if split == "train":
+                    reserved_train_tokens += len(target.encode("utf-8")) + 1
+            if split == "train" and reserved_train_tokens >= budget:
+                break
+        if not prepared:
+            if train_tokens >= budget:
+                break
+            continue
+        try:
+            payload, width, height = encode_training_image(image, maximum_image_side)
+        except Exception as error:
+            failed += 1
+            print(f"invalid image {source}:{image_key}: {error}", flush=True)
+            continue
+        for sample_id, prompt, target in prepared:
+            record = CorpusRecord(
+                sample_id=sample_id,
+                source=source,
+                split=split,
+                task="document",
+                prompt_text=prompt,
+                target_text=target,
+                image_bytes=payload,
+                width=width,
+                height=height,
+            )
+            if writer.add(record):
+                inserted += 1
+                if split == "train":
+                    train_tokens += record.target_bytes
+            if train_tokens >= budget:
+                break
+        if inserted and inserted % 2000 == 0:
+            writer.commit()
+            print(
+                f"{source} inserted={inserted} train_tokens={train_tokens}",
+                flush=True,
+            )
+        if train_tokens >= budget:
+            break
+    writer.commit()
+    return {
+        "inserted": inserted,
+        "failed": failed,
+        "skipped_multi_image": skipped_multi_image,
+        "train_tokens": train_tokens,
+    }
+
+
+def cauldron_rows(config: str, revision: str) -> Iterator[
+    tuple[str, object, Iterable[tuple[str, str]]]
+]:
+    os.environ.pop("ALL_PROXY", None)
+    os.environ.pop("all_proxy", None)
+    from datasets import load_dataset
+
+    dataset = load_dataset(
+        "HuggingFaceM4/the_cauldron",
+        name=config,
+        split="train",
+        revision=revision,
+        streaming=True,
+        batch_size=8,
+    ).decode(False)
+    for row_index, row in enumerate(dataset):
+        images = row.get("images") or []
+        if len(images) != 1:
+            continue
+        conversations = (
+            (turn.get("user", ""), turn.get("assistant", ""))
+            for turn in (row.get("texts") or [])
+        )
+        yield f"{row_index:09d}", images[0], conversations
+
+
+def pixmo_docs_rows(config: str, revision: str) -> Iterator[
+    tuple[str, object, Iterable[tuple[str, str]]]
+]:
+    os.environ.pop("ALL_PROXY", None)
+    os.environ.pop("all_proxy", None)
+    from datasets import load_dataset
+
+    dataset = load_dataset(
+        "allenai/pixmo-docs",
+        name=config,
+        split="train",
+        revision=revision,
+        streaming=True,
+        batch_size=8,
+    ).decode(False)
+    for row_index, row in enumerate(dataset):
+        questions = row.get("questions") or {}
+        conversations = zip(
+            questions.get("question") or [], questions.get("answer") or []
+        )
+        yield str(row.get("image_id") or f"{row_index:09d}"), row["image"], conversations
 
 
 def render_pdf(pdf: bytes, scale_to: int) -> tuple[bytes, int, int]:
@@ -361,20 +579,30 @@ def add_olmocr(
 def corpus_report(database: str) -> dict[str, object]:
     connection = sqlite3.connect(database)
     rows = connection.execute(
-        "SELECT source, split, COUNT(*), SUM(target_bytes), SUM(LENGTH(image)) "
-        "FROM samples GROUP BY source, split ORDER BY source, split"
+        "SELECT s.source, s.split, COUNT(*), SUM(s.target_bytes), "
+        "COUNT(DISTINCT s.image_id), "
+        "COALESCE((SELECT SUM(LENGTH(i.payload)) FROM images AS i WHERE i.image_id IN "
+        "(SELECT DISTINCT q.image_id FROM samples AS q "
+        "WHERE q.source=s.source AND q.split=s.split)), SUM(LENGTH(s.image)), 0) "
+        "FROM samples AS s GROUP BY s.source, s.split ORDER BY s.source, s.split"
     ).fetchall()
+    image_row = connection.execute(
+        "SELECT COUNT(*), COALESCE(SUM(LENGTH(payload)), 0) FROM images"
+    ).fetchone()
     connection.close()
     return {
+        "unique_images": image_row[0],
+        "stored_image_bytes": image_row[1],
         "sources": [
             {
                 "source": source,
                 "split": split,
                 "samples": count,
                 "target_tokens": tokens,
+                "unique_images": unique_images,
                 "compressed_image_bytes": image_bytes or 0,
             }
-            for source, split, count, tokens, image_bytes in rows
+            for source, split, count, tokens, unique_images, image_bytes in rows
         ]
     }
 
@@ -382,6 +610,8 @@ def corpus_report(database: str) -> dict[str, object]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", required=True)
+    parser.add_argument("--recipe")
+    parser.add_argument("--existing-database")
     parser.add_argument("--schedule")
     parser.add_argument("--validation-schedule")
     parser.add_argument("--report")
@@ -399,11 +629,67 @@ def main() -> None:
     parser.add_argument("--document-target-bytes", type=int, default=1024)
     parser.add_argument("--prompt-bytes", type=int, default=128)
     parser.add_argument("--render-size", type=int, default=1536)
+    parser.add_argument("--maximum-image-side", type=int, default=1536)
+    parser.add_argument(
+        "--cauldron-config",
+        action="append",
+        default=[],
+        metavar="CONFIG=TARGET_BYTES",
+    )
+    parser.add_argument(
+        "--cauldron-revision",
+        default="847a98a779b1652d65111daf20c972dfcd333605",
+    )
+    parser.add_argument(
+        "--pixmo-docs-config",
+        action="append",
+        default=[],
+        metavar="CONFIG=TARGET_BYTES",
+    )
+    parser.add_argument(
+        "--pixmo-docs-revision",
+        default="d887597bf4af2bc61a4210071a8cef898287e6fb",
+    )
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 1))
     args = parser.parse_args()
 
+    recipe = {}
+    if args.recipe:
+        recipe = json.loads(Path(args.recipe).read_text(encoding="utf-8"))
+    cauldron_specs = [
+        *args.cauldron_config,
+        *[
+            f"{item['config']}={item['target_bytes']}"
+            for item in recipe.get("cauldron", [])
+        ],
+    ]
+    pixmo_docs_specs = [
+        *args.pixmo_docs_config,
+        *[
+            f"{item['config']}={item['target_bytes']}"
+            for item in recipe.get("pixmo_docs", [])
+        ],
+    ]
+    cauldron_revision = recipe.get(
+        "cauldron_revision", args.cauldron_revision
+    )
+    pixmo_docs_revision = recipe.get(
+        "pixmo_docs_revision", args.pixmo_docs_revision
+    )
+    existing_specs = recipe.get("existing", [])
+    if existing_specs and not args.existing_database:
+        parser.error("the recipe contains existing sources; pass --existing-database")
+
     actions = {}
     with CorpusWriter(args.database) as writer:
+        for item in existing_specs:
+            source = item["source"]
+            actions[f"existing_{source}"] = import_existing_source(
+                writer,
+                args.existing_database,
+                source=source,
+                budget=int(item["target_bytes"]),
+            )
         if args.latex_parquet:
             actions["latex_ocr"] = add_parquet_ocr(
                 writer,
@@ -443,7 +729,37 @@ def main() -> None:
                 maximum_target_bytes=args.max_target_bytes,
                 prompt_bytes=args.prompt_bytes,
             )
+        for config, budget in parse_source_budgets(cauldron_specs):
+            source = f"cauldron_{config}"
+            actions[source] = add_qa_rows(
+                writer,
+                source=source,
+                rows=cauldron_rows(config, cauldron_revision),
+                budget=budget,
+                maximum_target_bytes=args.max_target_bytes,
+                maximum_image_side=args.maximum_image_side,
+            )
+        for config, budget in parse_source_budgets(pixmo_docs_specs):
+            source = f"pixmo_docs_{config}"
+            actions[source] = add_qa_rows(
+                writer,
+                source=source,
+                rows=pixmo_docs_rows(config, pixmo_docs_revision),
+                budget=budget,
+                maximum_target_bytes=args.max_target_bytes,
+                maximum_image_side=args.maximum_image_side,
+            )
         writer.set_metadata("build_arguments", vars(args))
+        writer.set_metadata(
+            "resolved_public_recipe",
+            {
+                "cauldron_revision": cauldron_revision,
+                "cauldron": cauldron_specs,
+                "pixmo_docs_revision": pixmo_docs_revision,
+                "pixmo_docs": pixmo_docs_specs,
+                "existing": existing_specs,
+            },
+        )
         writer.set_metadata("actions", actions)
 
     report = corpus_report(args.database)

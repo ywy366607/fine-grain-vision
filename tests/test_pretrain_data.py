@@ -20,6 +20,7 @@ from fine_grain.pretrain_data import (
     text_continuation_chunks,
     truncate_utf8,
 )
+from scripts.build_native_vlm_corpus import import_existing_source
 
 
 def image_bytes() -> bytes:
@@ -72,6 +73,69 @@ def test_corpus_schedule_and_collation_are_deterministic():
         assert batch.images.shape == (2, 3, 16, 16)
         assert batch.target_tokens == len("text-0".encode()) * 2 + 2
         assert batch.tokens.target_labels.shape == batch.tokens.target_input_ids.shape
+
+
+def test_corpus_deduplicates_shared_images_without_changing_records():
+    with tempfile.TemporaryDirectory() as directory:
+        database = Path(directory) / "corpus.sqlite"
+        schedule = Path(directory) / "schedule.jsonl"
+        payload = image_bytes()
+        with CorpusWriter(database) as writer:
+            for index in range(3):
+                assert writer.add(
+                    CorpusRecord(
+                        sample_id=f"qa-{index}",
+                        source="fixture",
+                        split="train",
+                        task="document",
+                        prompt_text=f"question {index}",
+                        target_text=f"answer {index}",
+                        image_bytes=payload,
+                        width=19,
+                        height=11,
+                    )
+                )
+            image_count = writer.connection.execute(
+                "SELECT COUNT(*) FROM images"
+            ).fetchone()[0]
+            stored_bytes = writer.connection.execute(
+                "SELECT SUM(LENGTH(payload)) FROM images"
+            ).fetchone()[0]
+            assert image_count == 1
+            assert stored_bytes == len(payload)
+        build_schedule(database, schedule, seed=7)
+        dataset = SQLiteVLMData(database, schedule)
+        assert [dataset[index].image_bytes for index in range(3)] == [payload] * 3
+
+
+def test_existing_corpus_import_respects_exact_source_budget():
+    with tempfile.TemporaryDirectory() as directory:
+        source_database = Path(directory) / "source.sqlite"
+        target_database = Path(directory) / "target.sqlite"
+        payload = image_bytes()
+        with CorpusWriter(source_database) as writer:
+            for index in range(3):
+                writer.add(
+                    CorpusRecord(
+                        sample_id=f"sample-{index}",
+                        source="fixture",
+                        split="train",
+                        task="ocr",
+                        prompt_text="",
+                        target_text="abcdefghij",
+                        image_bytes=payload,
+                        width=19,
+                        height=11,
+                    )
+                )
+        with CorpusWriter(target_database) as writer:
+            report = import_existing_source(
+                writer, str(source_database), source="fixture", budget=15
+            )
+            assert report == {"inserted": 2, "train_tokens": 15}
+            assert writer.connection.execute(
+                "SELECT COUNT(*) FROM images"
+            ).fetchone()[0] == 1
 
 
 def test_collator_rejects_mixed_modalities():
